@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "icon": "./assets/icon.png",
+    "android": {
+      "package": "com.smalljobs_k7p2.runable",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "extra": {
+      "apiUrl": "https://b588iqpvtru3uh0q4bcng-preview-4200.runable.site/"
+    },
+    "ios": {
+      "bundleIdentifier": "com.smalljobs_k7p2.runable",
+      "supportsTablet": true
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#FFFFFF"
+    },
+    "name": "SmallJobs",
+    "slug": "smalljobs",
+    "version": "1.0.0",
+    "scheme": "mobile",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SmallJobs needs your location to show nearby gigs."
+        }
+      ],
+    ]
+  }
+}
