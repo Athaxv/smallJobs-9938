@@ -7,6 +7,7 @@ import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { authMiddleware, requireAuth } from '../middleware/auth';
 import type { auth } from '../auth';
 import { CATEGORY_IDS, normalizeCategory } from '../../shared/categories';
+import { notifyNewPost } from '../services/notify-new-post';
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
@@ -72,6 +73,10 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
         responseCount: 0,
       })
       .returning();
+
+    void notifyNewPost({ post, authorName: user.name ?? 'Someone' }).catch(
+      (err) => console.error('[notify-new-post]', err),
+    );
 
     return c.json({ ok: true, post: serializePost(post) }, 201);
   })

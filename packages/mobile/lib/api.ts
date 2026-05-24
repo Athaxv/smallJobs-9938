@@ -77,6 +77,9 @@ export interface PatchProfilePayload {
   bio?: string;
   avatar?: string | null;
   location?: string;
+  lat?: number | null;
+  lng?: number | null;
+  notifyNearby?: boolean;
   isOnboarded?: boolean;
 }
 
@@ -228,5 +231,21 @@ export const aiApi = {
       answers,
       ...(meta?.intent ? { intent: meta.intent } : {}),
       ...(meta?.known ? { known: meta.known } : {}),
+    }),
+};
+
+// ─── Push notifications API ─────────────────────────────────────────────────
+
+export const notificationsApi = {
+  registerPushToken: (token: string, platform: "ios" | "android") =>
+    profileFetch<{ ok: boolean }>("/notifications/push-token", {
+      method: "POST",
+      body: JSON.stringify({ token, platform }),
+    }),
+
+  deletePushToken: (token: string) =>
+    profileFetch<{ ok: boolean }>("/notifications/push-token", {
+      method: "DELETE",
+      body: JSON.stringify({ token }),
     }),
 };

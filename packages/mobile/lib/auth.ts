@@ -9,6 +9,7 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
+import { unregisterPushToken } from "./push-notifications";
 
 export const BASE_URL = (
   Constants.expoConfig?.extra?.apiUrl ??
@@ -91,6 +92,7 @@ export async function signUp(name: string, email: string, password: string): Pro
 }
 
 export async function signOut() {
+  await unregisterPushToken();
   // Await the async clear so SecureStore actually deletes before callers proceed
   if (Platform.OS === "web") {
     clearToken();
