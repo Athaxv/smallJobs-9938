@@ -1,1 +1,14 @@
-Place your SmallJobs.apk here as 'smalljobs.apk' to enable the download button on the landing page.
+Put your Android build here as:
+
+  smalljobs.apk
+
+The landing page Download buttons fetch this file from /smalljobs.apk
+
+How to get the APK:
+1. cd packages/mobile
+2. eas login && eas build --platform android --profile preview
+3. Download the .apk from the Expo dashboard when the build finishes
+4. Copy/rename it to this folder as smalljobs.apk
+5. Redeploy the web app (or restart bun run dev locally)
+
+Optional: host the APK on a CDN and set VITE_APK_DOWNLOAD_URL in .env
