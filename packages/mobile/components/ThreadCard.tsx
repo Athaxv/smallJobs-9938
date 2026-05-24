@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { MapPin, Globe, CurrencyCircleDollar, ArrowRight, ChatCircle } from 'phosphor-react-native';
-import { Colors, Radius, Spacing, FontSize, FontWeight, Font, Shadows } from '../lib/theme';
+import { Colors, Radius, Spacing, FontSize, Font, Shadows } from '../lib/theme';
 import type { Thread } from '../lib/mockData';
+import { displayPostTitle, displayPostBody } from '../lib/postDisplay';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -54,6 +55,8 @@ export default function ThreadCard({ thread, onPress, variant = 'standard' }: Th
   const isOwn = variant === 'own';
   const isCompact = variant === 'compact';
   const ctaLabel = getCtaLabel(thread.category ?? thread.type);
+  const headline = displayPostTitle(thread.title, thread.body, thread.category);
+  const subtitle = displayPostBody(thread.title, thread.body);
 
   return (
     <TouchableOpacity
@@ -80,12 +83,12 @@ export default function ThreadCard({ thread, onPress, variant = 'standard' }: Th
 
         {/* Title */}
         <Text style={[styles.title, isFeatured && styles.titleFeatured]} numberOfLines={2}>
-          {thread.title}
+          {headline}
         </Text>
 
-        {/* Body */}
-        {!isCompact && (
-          <Text style={styles.body} numberOfLines={2}>{thread.body}</Text>
+        {/* Body — hidden when empty or redundant with title */}
+        {!isCompact && subtitle && (
+          <Text style={styles.body} numberOfLines={2}>{subtitle}</Text>
         )}
 
         {/* Footer */}

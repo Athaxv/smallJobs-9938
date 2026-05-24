@@ -1,33 +1,37 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import {
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Share, Alert,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
   ArrowLeft, MapPin, Globe, CurrencyCircleDollar, Clock,
-  Star, ChatCircle, PaperPlaneTilt, Heart, ShareNetwork,
+  Star, ChatCircle, PaperPlaneTilt, ShareNetwork,
 } from 'phosphor-react-native';
 import { Colors, Spacing, FontSize, Font, Radius, Shadows } from '../../lib/theme';
 import { API_URL } from '../../lib/config';
-import { getTokenAsync } from '../../lib/auth';
+import { getSession, getTokenAsync, type AuthUser } from '../../lib/auth';
+import { displayPostTitle, displayPostBody } from '../../lib/postDisplay';
 
 interface Post {
   id: string;
   title: string;
   body: string;
+  category?: string;
   type: 'local' | 'remote' | 'interest';
   isPaid: boolean;
   amount: number | null;
   tags: string[] | null;
   responseCount: number;
-  createdAt: string;
+  createdAt: string | number;
   author: {
-    id: string;
+    userId: string;
     name: string;
     avatar: string | null;
   };
 }
 
-function formatTime(iso: string) {
+function formatTime(iso: string | number) {
   const d = new Date(iso);
   const now = Date.now();
   const diff = Math.floor((now - d.getTime()) / 1000);
@@ -44,6 +48,7 @@ function initials(name: string) {
 export default function ThreadDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [post, setPost] = useState<Post | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -51,10 +56,11 @@ export default function ThreadDetailScreen() {
 
   useEffect(() => {
     if (!id) return;
+    getSession().then(setCurrentUser);
     getTokenAsync().then(token =>
-    fetch(`${API_URL}/api/posts/${id}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }))
+      fetch(`${API_URL}/api/posts/${id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }))
       .then(r => r.json())
       .then(d => {
         if (d.ok) setPost(d.post);
@@ -64,8 +70,23 @@ export default function ThreadDetailScreen() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  const isOwnPost = currentUser != null && post != null && currentUser.id === post.author.userId;
+
+  const handleShare = async () => {
+    if (!post) return;
+    const headline = displayPostTitle(post.title, post.body, post.category);
+    const subtitle = displayPostBody(post.title, post.body);
+    try {
+      await Share.share({
+        message: subtitle
+          ? `${headline}\n\n${subtitle}\n\n— via SmallJobs`
+          : `${headline}\n\n— via SmallJobs`,
+      });
+    } catch {}
+  };
+
   const handleInterested = async () => {
-    if (submitting || submitted) return;
+    if (submitting || submitted || isOwnPost) return;
     setSubmitting(true);
     try {
       const token = await getTokenAsync();
@@ -86,7 +107,6 @@ export default function ThreadDetailScreen() {
       if (res.ok && data.ok) {
         setSubmitted(true);
         setPost(p => p ? { ...p, responseCount: p.responseCount + 1 } : p);
-        // Navigate to the conversation that was created automatically
         router.push(`/chat/${data.conversationId}` as any);
       } else {
         Alert.alert('Error', data.message ?? 'Could not send response');
@@ -133,6 +153,8 @@ export default function ThreadDetailScreen() {
   }
 
   const authorInitials = initials(post.author.name);
+  const headline = displayPostTitle(post.title, post.body, post.category);
+  const subtitle = displayPostBody(post.title, post.body);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -142,10 +164,7 @@ export default function ThreadDetailScreen() {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Thread</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Heart size={18} color={Colors.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
+          <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
             <ShareNetwork size={18} color={Colors.textSecondary} />
           </TouchableOpacity>
         </View>
@@ -174,8 +193,8 @@ export default function ThreadDetailScreen() {
             </View>
           </View>
 
-          <Text style={styles.title}>{post.title}</Text>
-          <Text style={styles.body}>{post.body}</Text>
+          <Text style={styles.title}>{headline}</Text>
+          {subtitle ? <Text style={styles.body}>{subtitle}</Text> : null}
 
           {(post.tags ?? []).length > 0 && (
             <View style={styles.tagsRow}>
@@ -203,9 +222,14 @@ export default function ThreadDetailScreen() {
                 <Text style={styles.ratingText}>New member</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.viewProfileBtn}>
-              <Text style={styles.viewProfileText}>View Profile</Text>
-            </TouchableOpacity>
+            {!isOwnPost && (
+              <TouchableOpacity
+                style={styles.viewProfileBtn}
+                onPress={() => router.push(`/user/${post.author.userId}` as any)}
+              >
+                <Text style={styles.viewProfileText}>View Profile</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -222,21 +246,31 @@ export default function ThreadDetailScreen() {
         <View style={{ height: 120 }} />
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <TouchableOpacity
-          style={[styles.ctaBtn, (submitting || submitted) && styles.ctaBtnDisabled]}
-          activeOpacity={0.88}
-          onPress={handleInterested}
-          disabled={submitting || submitted}
-        >
-          {submitting
-            ? <ActivityIndicator size="small" color="#FFFFFF" />
-            : <PaperPlaneTilt size={18} color="#FFFFFF" weight="fill" />}
-          <Text style={styles.ctaBtnText}>
-            {submitted ? 'Request Sent!' : submitting ? 'Sending...' : "I'm Interested"}
-          </Text>
-        </TouchableOpacity>
-      </View>
+      {!isOwnPost && (
+        <View style={styles.bottomBar}>
+          <TouchableOpacity
+            style={[styles.ctaBtn, (submitting || submitted) && styles.ctaBtnDisabled]}
+            activeOpacity={0.88}
+            onPress={handleInterested}
+            disabled={submitting || submitted}
+          >
+            {submitting
+              ? <ActivityIndicator size="small" color="#FFFFFF" />
+              : <PaperPlaneTilt size={18} color="#FFFFFF" weight="fill" />}
+            <Text style={styles.ctaBtnText}>
+              {submitted ? 'Request Sent!' : submitting ? 'Sending...' : "I'm Interested"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {isOwnPost && (
+        <View style={styles.bottomBar}>
+          <View style={styles.ownPostPill}>
+            <Text style={styles.ownPostText}>This is your post</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -318,4 +352,9 @@ const styles = StyleSheet.create({
   },
   ctaBtnDisabled: { backgroundColor: Colors.textPlaceholder },
   ctaBtnText: { fontSize: FontSize.bodyL, fontFamily: Font.sansSemibold, color: '#FFFFFF' },
+  ownPostPill: {
+    backgroundColor: Colors.surfaceSoft, borderRadius: Radius.pill, height: 52,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  ownPostText: { fontSize: FontSize.body, fontFamily: Font.sansMedium, color: Colors.textSecondary },
 });
