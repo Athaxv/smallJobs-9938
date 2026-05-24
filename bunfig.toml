@@ -1,0 +1,3 @@
+[install]
+# Hoisted layout avoids broken junctions for Expo / React Native on Windows.
+linker = "hoisted"

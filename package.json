@@ -17,6 +17,7 @@
     "db:studio": "turbo db:studio"
   },
   "devDependencies": {
+    "@react-native/debugger-frontend": "0.81.5",
     "@tursodatabase/api": "^1.9.2",
     "@types/bun": "latest",
     "turbo": "^2"

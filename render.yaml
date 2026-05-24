@@ -1,0 +1,26 @@
+# Render blueprint for SmallJobs (landing page + Hono API)
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: smalljobs
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: packages/web
+    buildCommand: cd ../.. && bun install && cd packages/web && bun run build
+    startCommand: bun run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WEBSITE_URL
+        sync: false
+      - key: BETTER_AUTH_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_AUTH_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
