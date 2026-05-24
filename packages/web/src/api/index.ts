@@ -6,6 +6,7 @@ import aiRoutes from './routes/ai';
 import { postRoutes } from './routes/posts';
 import { responseRoutes } from './routes/responses';
 import { messageRoutes } from './routes/messages';
+import { notificationRoutes } from './routes/notifications';
 
 const app = new Hono()
   .use(cors({
@@ -20,7 +21,8 @@ const app = new Hono()
   .route('/ai', aiRoutes)
   .route('/posts', postRoutes)
   .route('/responses', responseRoutes)
-  .route('/messages', messageRoutes);
+  .route('/messages', messageRoutes)
+  .route('/notifications', notificationRoutes);
 
 export type AppType = typeof app;
 export default app;

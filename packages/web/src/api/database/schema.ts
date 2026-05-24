@@ -12,6 +12,9 @@ export const profiles = sqliteTable("profiles", {
   bio: text("bio"),
   avatar: text("avatar"),                               // URL or initials fallback
   location: text("location"),
+  lat: real("lat"),
+  lng: real("lng"),
+  notifyNearby: integer("notify_nearby", { mode: "boolean" }).default(true).notNull(),
   rating: real("rating").default(0),
   ratingCount: integer("rating_count").default(0),
   isOnboarded: integer("is_onboarded", { mode: "boolean" }).default(false).notNull(),
@@ -40,6 +43,17 @@ export const posts = sqliteTable("posts", {
   status: text("status", { enum: ["open", "closed", "expired"] }).notNull().default("open"),
   responseCount: integer("response_count").default(0).notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});
+
+// ─── Push tokens (Expo) ─────────────────────────────────────────────────────
+export const pushTokens = sqliteTable("push_tokens", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull(),
+  token: text("token").notNull().unique(),
+  platform: text("platform", { enum: ["ios", "android"] }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
 });
