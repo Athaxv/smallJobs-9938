@@ -26,28 +26,9 @@ export interface Category {
   id: string;
   label: string;
   emoji: string;
-  color: string;
-  bg: string;
 }
 
-export const CATEGORIES: Category[] = [
-  { id: 'delivery', label: 'Delivery / Ride', emoji: '🛵', color: '#EF4444', bg: '#FFF5F5' },
-  { id: 'walking', label: 'Walking Companion', emoji: '🚶', color: '#22C55E', bg: '#F0FDF4' },
-  { id: 'nearby', label: 'Nearby Help', emoji: '📍', color: '#F59E0B', bg: '#FFFBEB' },
-  { id: 'technician', label: 'Technician Needed', emoji: '🔧', color: '#3B82F6', bg: '#EFF6FF' },
-  { id: 'purchase', label: 'Quick Purchase', emoji: '🛍️', color: '#8B5CF6', bg: '#F5F3FF' },
-  { id: 'emergency', label: 'Emergency Assistance', emoji: '🚨', color: '#DC2626', bg: '#FEF2F2' },
-  { id: 'queue', label: 'Queue Substitute', emoji: '🪑', color: '#D97706', bg: '#FFFBEB' },
-  { id: 'college', label: 'College Help', emoji: '🎓', color: '#7C3AED', bg: '#F5F3FF' },
-  { id: 'pet', label: 'Pet Help', emoji: '🐾', color: '#059669', bg: '#ECFDF5' },
-  { id: 'language', label: 'Language / Translation', emoji: '🌐', color: '#0284C7', bg: '#F0F9FF' },
-  { id: 'local-info', label: 'Local Information', emoji: '🗺️', color: '#64748B', bg: '#F8FAFC' },
-  { id: 'errands', label: 'Errands', emoji: '✅', color: '#16A34A', bg: '#F0FDF4' },
-  { id: 'hangout', label: 'Hangout', emoji: '☕', color: '#CA8A04', bg: '#FEFCE8' },
-  { id: 'remote', label: 'Remote Help', emoji: '💻', color: '#2563EB', bg: '#EFF6FF' },
-  { id: 'creative', label: 'Creative', emoji: '🎨', color: '#9333EA', bg: '#FAF5FF' },
-  { id: 'chat', label: 'Just Chat', emoji: '💬', color: '#0891B2', bg: '#ECFEFF' },
-];
+export { POST_CATEGORIES as CATEGORIES } from '@template/web/categories';
 
 export const NEARBY_THREADS: Thread[] = [
   {

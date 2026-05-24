@@ -21,12 +21,12 @@ const STORE_KEY = "sj_token";
 
 // ─── Token storage ────────────────────────────────────────────────────────────
 
-export function setToken(token: string) {
+export async function setToken(token: string) {
   if (Platform.OS === "web") {
     const expires = new Date(Date.now() + 86400 * 1000).toUTCString();
     document.cookie = `${COOKIE_NAME}=${token}; path=/; expires=${expires}; SameSite=None; Secure`;
   } else {
-    SecureStore.setItemAsync(STORE_KEY, token);
+    await SecureStore.setItemAsync(STORE_KEY, token);
   }
 }
 
@@ -80,13 +80,13 @@ async function authFetch(path: string, body: Record<string, string>): Promise<Au
 
 export async function signIn(email: string, password: string): Promise<AuthResult> {
   const result = await authFetch("/login", { email, password });
-  setToken(result.token);
+  await setToken(result.token);
   return result;
 }
 
 export async function signUp(name: string, email: string, password: string): Promise<AuthResult> {
   const result = await authFetch("/signup", { name, email, password });
-  setToken(result.token);
+  await setToken(result.token);
   return result;
 }
 

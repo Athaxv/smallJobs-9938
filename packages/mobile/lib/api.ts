@@ -48,6 +48,7 @@ export interface Post {
   amount: number | null;
   status: "open" | "closed" | "expired";
   responseCount: number;
+  tags?: string[] | null;
   createdAt: number | string;
 }
 
@@ -171,4 +172,61 @@ export const profileApi = {
       user: PublicUser;
       trust: TrustSummary;
     }>(`/profile/${userId}`),
+};
+
+// ─── AI API ───────────────────────────────────────────────────────────────────
+
+export interface AIQuestion {
+  question: string;
+  options: string[];
+}
+
+export interface AnalyzeResponse {
+  ok: boolean;
+  complete?: boolean;
+  intent?: string;
+  known?: Record<string, string>;
+  questions?: AIQuestion[];
+}
+
+export interface StructuredThread {
+  title: string;
+  body: string;
+  type: "local" | "remote" | "interest";
+  category: string;
+  tags: string[];
+  isPaid: boolean;
+  amount?: number;
+  urgency: "asap" | "today" | "this_week" | "flexible";
+  visibility: string;
+}
+
+async function aiFetch<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const res = await apiFetch<T>(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    const err = json as { message?: string; error?: string };
+    throw new Error(err.message ?? err.error ?? `Request failed: ${res.status}`);
+  }
+  return json;
+}
+
+export const aiApi = {
+  analyze: (request: string) =>
+    aiFetch<AnalyzeResponse>("/ai/analyze", { request }),
+
+  structure: (
+    request: string,
+    answers: string[],
+    meta?: { intent?: string; known?: Record<string, string> },
+  ) =>
+    aiFetch<{ ok: boolean; thread?: StructuredThread }>("/ai/structure", {
+      request,
+      answers,
+      ...(meta?.intent ? { intent: meta.intent } : {}),
+      ...(meta?.known ? { known: meta.known } : {}),
+    }),
 };

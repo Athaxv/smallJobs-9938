@@ -36,6 +36,7 @@ export const posts = sqliteTable("posts", {
   distance: text("distance"),                           // e.g. "1.2 km"
   lat: real("lat"),                                     // approximate latitude
   lng: real("lng"),                                     // approximate longitude
+  tags: text("tags"),                                   // JSON array of tag strings
   status: text("status", { enum: ["open", "closed", "expired"] }).notNull().default("open"),
   responseCount: integer("response_count").default(0).notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })

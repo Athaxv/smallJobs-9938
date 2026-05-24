@@ -6,18 +6,41 @@ import * as schema from '../database/schema';
 import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { authMiddleware, requireAuth } from '../middleware/auth';
 import type { auth } from '../auth';
+import { CATEGORY_IDS, normalizeCategory } from '../../shared/categories';
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
 type Variables = { user: User | null; session: Session | null };
 
+type PostRow = typeof schema.posts.$inferSelect;
+
+function parseTags(raw: string | null | undefined): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
+function serializePost(post: PostRow) {
+  return {
+    ...post,
+    category: normalizeCategory(post.category),
+    tags: parseTags(post.tags),
+  };
+}
+
 const createPostSchema = z.object({
   title: z.string().min(3).max(120),
   body: z.string().min(5).max(600),
-  category: z.string().min(1).max(60),
+  category: z.enum(CATEGORY_IDS),
   type: z.enum(['local', 'remote', 'interest']),
   isPaid: z.boolean(),
   amount: z.number().optional(),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
   urgency: z.enum(['asap', 'today', 'this_week', 'flexible']).optional(),
   location: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -38,16 +61,19 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
         userId: user.id,
         title: body.title,
         body: body.body,
-        category: body.category,
+        category: normalizeCategory(body.category),
         type: body.type,
         isPaid: body.isPaid,
         amount: body.amount ?? null,
+        lat: body.lat ?? null,
+        lng: body.lng ?? null,
+        tags: body.tags?.length ? JSON.stringify(body.tags) : null,
         status: 'open',
         responseCount: 0,
       })
       .returning();
 
-    return c.json({ ok: true, post }, 201);
+    return c.json({ ok: true, post: serializePost(post) }, 201);
   })
 
   // GET /api/posts — feed with optional filters + pagination
@@ -65,9 +91,8 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
       const offset = (page - 1) * limit;
 
       const filters = [];
-      if (category) filters.push(eq(schema.posts.category, category));
+      if (category) filters.push(eq(schema.posts.category, normalizeCategory(category)));
       if (type) filters.push(eq(schema.posts.type, type));
-      // Only open posts in feed
       filters.push(eq(schema.posts.status, 'open'));
 
       const postsResult = await db
@@ -88,7 +113,6 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
         .limit(limit)
         .offset(offset);
 
-      // Get auth users for names
       const userIds = [...new Set(postsResult.map(r => r.post.userId))];
       const authUsers = userIds.length > 0
         ? await db
@@ -100,7 +124,7 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
       const userMap = Object.fromEntries(authUsers.map(u => [u.id, u]));
 
       const posts = postsResult.map(r => ({
-        ...r.post,
+        ...serializePost(r.post),
         author: {
           userId: r.post.userId,
           name: userMap[r.post.userId]?.name ?? 'User',
@@ -120,25 +144,24 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
     zValidator('query', z.object({
       lat: z.coerce.number(),
       lng: z.coerce.number(),
-      radius: z.coerce.number().max(50).default(10), // km
+      radius: z.coerce.number().max(50).default(10),
       category: z.string().optional(),
       urgency: z.string().optional(),
-      limit: z.coerce.number().max(100).default(50,),
+      limit: z.coerce.number().max(100).default(50),
     })),
     async (c) => {
       const { lat, lng, radius, category, limit } = c.req.valid('query');
 
-      // Pull posts with coords in a bounding box first (cheap), then filter by haversine
       const latDelta = radius / 111.0;
       const lngDelta = radius / (111.0 * Math.cos(lat * Math.PI / 180));
 
-      // Use raw SQL for the spatial query to avoid libsql interpolation issues
       const latMin = lat - latDelta;
       const latMax = lat + latDelta;
       const lngMin = lng - lngDelta;
       const lngMax = lng + lngDelta;
 
-      const catFilter = category && category !== 'all' ? `AND p.category = '${category.replace(/'/g, "''")}'` : '';
+      const normalizedCat = category && category !== 'all' ? normalizeCategory(category) : null;
+      const catFilter = normalizedCat ? `AND p.category = '${normalizedCat.replace(/'/g, "''")}'` : '';
       const rawSql = sql`
         SELECT p.id, p.user_id, p.title, p.body, p.category, p.type, p.is_paid, p.amount,
                p.distance, p.status, p.response_count, p.created_at, p.lat, p.lng,
@@ -156,14 +179,11 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
       `;
 
       const rawResult = await db.run(rawSql);
-      // libsql returns rows as arrays [col0, col1, ...] — map by index
-      // cols: id(0), user_id(1), title(2), body(3), category(4), type(5), is_paid(6), amount(7),
-      //       distance(8), status(9), response_count(10), created_at(11), lat(12), lng(13),
-      //       profile_user_id(14), avatar(15), profile_location(16), rating(17)
       const rawPosts = (rawResult.rows as unknown as unknown[][]).map(r => ({
         post: {
           id: r[0] as string, userId: r[1] as string, title: r[2] as string, body: r[3] as string,
-          category: r[4] as string, type: (r[5] as string) as 'local' | 'remote' | 'interest',
+          category: normalizeCategory(r[4] as string),
+          type: (r[5] as string) as 'local' | 'remote' | 'interest',
           isPaid: !!(r[6] as number), amount: r[7] as number | null, distance: r[8] as string | null,
           status: r[9] as string, responseCount: r[10] as number, createdAt: r[11] as number,
           lat: r[12] as number, lng: r[13] as number,
@@ -174,7 +194,6 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
         },
       }));
 
-      // Haversine filter + distance calc
       const R = 6371;
       const toRad = (d: number) => (d * Math.PI) / 180;
       const haversine = (pLat: number, pLng: number) => {
@@ -188,7 +207,6 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
         .filter(r => r.post.lat != null && r.post.lng != null && haversine(r.post.lat!, r.post.lng!) <= radius)
         .map(r => {
           const dist = haversine(r.post.lat!, r.post.lng!);
-          // Fuzz exact location — add ±30m random offset for privacy
           const fuzzLat = r.post.lat! + (Math.random() - 0.5) * 0.0005;
           const fuzzLng = r.post.lng! + (Math.random() - 0.5) * 0.0005;
           return {
@@ -254,7 +272,7 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
     return c.json({
       ok: true,
       post: {
-        ...result.post,
+        ...serializePost(result.post),
         author: {
           userId: result.post.userId,
           name: authUser?.name ?? 'User',
