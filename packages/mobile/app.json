@@ -6,10 +6,18 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "extra": {
-      "apiUrl": "https://b588iqpvtru3uh0q4bcng-preview-4200.runable.site/"
+      "apiUrl": "https://smalljobs-3kyj.onrender.com",
+      "router": {},
+      "eas": {
+        "projectId": "eb61e878-dc04-4312-af47-3d36c1bed7af"
+      }
     },
     "ios": {
       "bundleIdentifier": "com.smalljobs_k7p2.runable",
@@ -37,7 +45,7 @@
         {
           "locationWhenInUsePermission": "SmallJobs needs your location to show nearby gigs."
         }
-      ],
+      ]
     ]
   }
 }

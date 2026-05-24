@@ -1,77 +1,65 @@
-function FeedCard({
-  category,
-  title,
-  distance,
-  accent,
-}: {
-  category: string;
-  title: string;
-  distance: string;
-  accent?: boolean;
-}) {
+import { cn } from "@/lib/utils";
+
+type PhoneMockupProps = {
+  src?: string;
+  alt: string;
+  size?: "hero" | "section";
+  className?: string;
+};
+
+const sizeClasses = {
+  hero: "max-w-[280px] max-h-[min(640px,calc(100svh-6rem))] lg:max-w-[300px]",
+  section: "max-w-[220px] max-h-[520px] sm:max-w-[240px]",
+};
+
+export function PhoneMockup({
+  src = "/phone1.jpeg",
+  alt,
+  size = "hero",
+  className,
+}: PhoneMockupProps) {
   return (
     <div
-      className={`rounded-2xl border border-black/5 p-3.5 ${
-        accent ? "bg-sj-primary text-white" : "bg-white"
-      }`}
+      className={cn(
+        "relative mx-auto w-full",
+        sizeClasses[size],
+        className,
+      )}
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span
-          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium ${
-            accent
-              ? "bg-white/15 text-white"
-              : "bg-sj-surface text-sj-muted"
-          }`}
-        >
-          {category}
-        </span>
-        <span
-          className={`text-[10px] font-medium ${
-            accent ? "text-white/70" : "text-sj-placeholder"
-          }`}
-        >
-          {distance}
-        </span>
-      </div>
-      <p
-        className={`font-serif text-[15px] leading-snug ${
-          accent ? "text-white" : "text-sj-primary"
-        }`}
-      >
-        {title}
-      </p>
-    </div>
-  );
-}
+      <div
+        className="absolute -inset-6 rounded-[4rem] bg-black/10 blur-3xl"
+        aria-hidden="true"
+      />
 
-export function PhoneMockup() {
-  return (
-    <div className="relative mx-auto w-full max-w-[300px] lg:max-w-[320px]">
-      <div className="absolute -inset-4 rounded-[40px] bg-black/5 blur-2xl" />
-      <div className="relative rounded-[36px] border-[6px] border-sj-primary bg-sj-primary p-2 shadow-[0_24px_64px_rgba(0,0,0,0.18)]">
-        <div className="overflow-hidden rounded-[28px] bg-sj-surface">
-          <div className="flex items-center justify-between px-4 pb-2 pt-3">
-            <span className="font-serif text-sm text-sj-primary">SmallJobs</span>
-            <div className="h-2 w-10 rounded-full bg-black/10" />
-          </div>
-          <div className="space-y-2.5 px-3 pb-5 pt-1">
-            <FeedCard
-              category="Errands"
-              title="Need someone to pick up meds from pharmacy"
-              distance="0.4 km"
-            />
-            <FeedCard
-              category="Walk buddy"
-              title="Evening walk partner near Koramangala 5th Block"
-              distance="0.8 km"
-              accent
-            />
-            <FeedCard
-              category="Borrow"
-              title="USB-C charger for a couple hours"
-              distance="1.2 km"
-            />
-          </div>
+      <div className="relative flex max-h-[inherit] aspect-[9/19.5] w-full flex-col rounded-[3rem] bg-zinc-950 p-[10px] shadow-[0_32px_80px_rgba(0,0,0,0.28)] ring-1 ring-white/10">
+        <div
+          className="absolute left-[-2px] top-[88px] h-8 w-[3px] rounded-l-sm bg-zinc-700"
+          aria-hidden="true"
+        />
+        <div
+          className="absolute left-[-2px] top-[132px] h-12 w-[3px] rounded-l-sm bg-zinc-700"
+          aria-hidden="true"
+        />
+        <div
+          className="absolute left-[-2px] top-[188px] h-12 w-[3px] rounded-l-sm bg-zinc-700"
+          aria-hidden="true"
+        />
+        <div
+          className="absolute right-[-2px] top-[148px] h-16 w-[3px] rounded-r-sm bg-zinc-700"
+          aria-hidden="true"
+        />
+
+        <div className="relative min-h-0 flex-1 overflow-hidden rounded-[2.4rem] bg-black">
+          <div
+            className="pointer-events-none absolute left-1/2 top-3 z-10 h-[26px] w-[100px] -translate-x-1/2 rounded-full bg-black"
+            aria-hidden="true"
+          />
+          <img
+            src={src}
+            alt={alt}
+            className="block h-full w-full rounded-[2.4rem] object-cover object-top"
+            loading="lazy"
+          />
         </div>
       </div>
     </div>

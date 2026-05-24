@@ -138,6 +138,24 @@
   .font-sans {
     font-family: var(--font-sans);
   }
+
+  .footer-dot-grid {
+    background-image: radial-gradient(
+      circle,
+      rgba(17, 17, 17, 0.09) 1px,
+      transparent 1px
+    );
+    background-size: 18px 18px;
+  }
+
+  .footer-dot-grid-fine {
+    background-image: radial-gradient(
+      circle,
+      rgba(17, 17, 17, 0.06) 0.75px,
+      transparent 0.75px
+    );
+    background-size: 10px 10px;
+  }
 }
 
 @keyframes hero-logo-in {

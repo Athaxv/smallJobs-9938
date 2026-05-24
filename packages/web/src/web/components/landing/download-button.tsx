@@ -13,16 +13,21 @@ type DownloadButtonProps = {
   className?: string;
   label?: string;
   loadingLabel?: string;
+  compact?: boolean;
 };
 
 export function DownloadButton({
   variant = "primary",
   className,
-  label = "Download for Android",
+  label,
   loadingLabel = "Starting download…",
+  compact = false,
 }: DownloadButtonProps) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const displayLabel =
+    label ?? (compact ? "Download APK" : "Download for Android");
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -55,14 +60,24 @@ export function DownloadButton({
   };
 
   return (
-    <div className="flex w-full flex-col items-stretch gap-2">
+    <div
+      className={cn(
+        compact
+          ? "inline-flex shrink-0"
+          : "flex w-full flex-col items-stretch gap-2",
+      )}
+    >
       <Button
         type="button"
         onClick={handleDownload}
         disabled={downloading}
-        aria-label={downloading ? loadingLabel : label}
+        aria-label={downloading ? loadingLabel : displayLabel}
+        title={compact && error ? error : undefined}
         className={cn(
-          "h-auto rounded-2xl px-6 py-[18px] text-base font-semibold transition-all",
+          "h-auto font-semibold transition-all",
+          compact
+            ? "rounded-xl px-4 py-2 text-sm"
+            : "rounded-2xl px-6 py-[18px] text-base",
           variant === "primary" &&
             "bg-sj-primary text-white hover:bg-sj-primary/90",
           variant === "inverse" &&
@@ -70,13 +85,24 @@ export function DownloadButton({
           className,
         )}
       >
-        <Download className="size-5" aria-hidden="true" />
-        {downloading ? loadingLabel : label}
+        <Download
+          className={compact ? "size-4" : "size-5"}
+          aria-hidden="true"
+        />
+        {downloading ? loadingLabel : displayLabel}
       </Button>
-      {error ? (
-        <p className="text-center text-xs leading-relaxed text-red-600" role="alert">
+      {error && !compact ? (
+        <p
+          className="text-center text-xs leading-relaxed text-red-600"
+          role="alert"
+        >
           {error}
         </p>
+      ) : null}
+      {error && compact ? (
+        <span className="sr-only" role="alert">
+          {error}
+        </span>
       ) : null}
     </div>
   );
