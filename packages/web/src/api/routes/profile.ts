@@ -15,6 +15,9 @@ const patchProfileSchema = z.object({
   bio: z.string().max(200).optional(),
   avatar: z.string().url().optional().nullable(),
   location: z.string().max(100).optional(),
+  lat: z.number().min(-90).max(90).optional().nullable(),
+  lng: z.number().min(-180).max(180).optional().nullable(),
+  notifyNearby: z.boolean().optional(),
   isOnboarded: z.boolean().optional(),
   name: z.string().min(1).max(80).optional(),
 });
