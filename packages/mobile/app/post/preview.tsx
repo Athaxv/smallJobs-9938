@@ -4,29 +4,16 @@ import {
   ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
 import {
   ArrowLeft, Sparkle, MapPin, Globe, CurrencyCircleDollar,
   Clock, PencilSimple, RocketLaunch,
 } from 'phosphor-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { normalizeCategory } from '@template/web/categories';
 import { Colors, Spacing, FontSize, Radius, Shadows, Font } from '../../lib/theme';
-import { api } from '../../lib/api';
-
-const API_BASE =
-  process.env.EXPO_PUBLIC_API_URL ??
-  'https://b588iqpvtru3uh0q4bcng-preview-4200.runable.site/';
-
-interface StructuredThread {
-  title: string;
-  body: string;
-  type: 'local' | 'remote' | 'interest';
-  category: string;
-  tags: string[];
-  isPaid: boolean;
-  amount?: number;
-  urgency: 'asap' | 'today' | 'this_week' | 'flexible';
-  visibility: string;
-}
+import { api, aiApi, type StructuredThread } from '../../lib/api';
+import { displayPostTitle, displayPostBody } from '../../lib/postDisplay';
 
 const URGENCY_LABELS: Record<string, string> = {
   asap: 'ASAP',
@@ -35,32 +22,56 @@ const URGENCY_LABELS: Record<string, string> = {
   flexible: 'Flexible',
 };
 
-function buildFallback(request: string, answers: string[]): StructuredThread {
+function buildFallback(
+  request: string,
+  answers: string[],
+  intent?: string,
+): StructuredThread {
   const lower = request.toLowerCase();
   let type: 'local' | 'remote' | 'interest' = 'remote';
-  let category = 'General';
+  let category = 'other';
   let tags: string[] = [];
   let visibility = 'Shown to everyone online';
 
-  if (lower.includes('walk') || lower.includes('groceri') || lower.includes('pickup') || lower.includes('hangout')) {
-    type = 'local'; visibility = 'Shown to users within 2 km';
+  const isSocial =
+    intent === 'social_companion' ||
+    intent === 'interest_discovery' ||
+    /\b(walk|run|jog|club|buddy|hangout|hang out|companion|morning run|walk club|running group)\b/.test(lower);
+
+  if (isSocial) {
+    type = /\b(club|group|running group|walk club)\b/.test(lower) ? 'interest' : 'local';
+    visibility = type === 'interest'
+      ? 'Shown to people nearby with matching interests'
+      : 'Shown to users within 2 km';
+    category = /\b(run|jog|club|group)\b/.test(lower) ? 'walking' : 'hangout';
+    tags = /\b(run|jog)\b/.test(lower) ? ['run', 'fitness'] : ['walk', 'casual'];
+  } else if (lower.includes('groceri') || lower.includes('pickup') || lower.includes('deliver') || lower.includes('errand')) {
+    type = 'local';
+    category = 'errands';
+    tags = ['errand', 'local'];
+    visibility = 'Shown to users within 2 km';
+  } else if (lower.includes('assign') || lower.includes('write') || lower.includes('study') || lower.includes('tutor')) {
+    type = 'remote';
+    category = 'study';
+    tags = ['study', 'help'];
+  } else if (lower.includes('manhwa') || lower.includes('manga') || lower.includes('anime')) {
+    type = 'interest';
+    category = 'chat';
+    visibility = 'Shown to users with matching interests';
+    tags = ['fandom', 'interest'];
   }
-  if (lower.includes('manhwa') || lower.includes('manga') || lower.includes('anime')) {
-    type = 'interest'; visibility = 'Shown to users with matching interests'; tags = ['fandom', 'interest'];
-  }
-  if (lower.includes('assign') || lower.includes('write')) { category = 'Study Help'; tags = ['assignment', 'writing']; }
-  if (lower.includes('walk')) { category = 'Walk & Sport'; tags = ['walk', 'casual']; }
-  if (lower.includes('groceri')) { category = 'Errands'; tags = ['grocery', 'pickup']; }
-  if (lower.includes('hang')) { category = 'Hangout'; tags = ['hangout', 'casual']; }
 
   const paidAnswer = answers.find(a => a.includes('₹') || a.toLowerCase().includes('pay'));
   let isPaid = false;
   let amount: number | undefined;
-  if (paidAnswer && !paidAnswer.toLowerCase().includes('not') && !paidAnswer.toLowerCase().includes('free')) {
+  if (!isSocial && paidAnswer && !paidAnswer.toLowerCase().includes('not') && !paidAnswer.toLowerCase().includes('free')) {
     isPaid = true;
     const match = paidAnswer.match(/₹(\d+)/);
     amount = match ? parseInt(match[1]) : 300;
   }
+
+  const hasUrgent = /\b(asap|urgent|today|tonight|now)\b/.test(lower);
+  const hasWeek = /\b(this week|weekend|tomorrow)\b/.test(lower);
 
   return {
     title: request.length > 70 ? request.substring(0, 67) + '...' : request,
@@ -70,15 +81,26 @@ function buildFallback(request: string, answers: string[]): StructuredThread {
     tags,
     isPaid,
     amount,
-    urgency: 'flexible',
+    urgency: hasUrgent ? 'today' : hasWeek ? 'this_week' : 'flexible',
     visibility,
   };
 }
 
 export default function ThreadPreviewScreen() {
-  const { request, answers: answersRaw } =
-    useLocalSearchParams<{ request: string; answers: string }>();
-  const answers = JSON.parse(answersRaw ?? '[]') as string[];
+  const { request, answers: answersRaw, intent, known: knownRaw } =
+    useLocalSearchParams<{ request: string; answers: string; intent?: string; known?: string }>();
+  let answers: string[] = [];
+  let known: Record<string, string> | undefined;
+  try {
+    answers = JSON.parse(answersRaw ?? '[]') as string[];
+  } catch {
+    answers = [];
+  }
+  try {
+    known = knownRaw ? JSON.parse(knownRaw) as Record<string, string> : undefined;
+  } catch {
+    known = undefined;
+  }
 
   const [thread, setThread] = useState<StructuredThread | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,21 +112,18 @@ export default function ThreadPreviewScreen() {
   const structureThread = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}api/ai/structure`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request, answers }),
-        credentials: 'include',
-      });
-      const data = await res.json() as { ok: boolean; thread?: StructuredThread };
+      const data = await aiApi.structure(request ?? '', answers, { intent, known });
       if (data.ok && data.thread) {
-        setThread(data.thread);
+        setThread({
+          ...data.thread,
+          category: normalizeCategory(data.thread.category),
+        });
       } else {
-        setThread(buildFallback(request ?? '', answers));
+        setThread(buildFallback(request ?? '', answers, intent));
         setAiFallback(true);
       }
     } catch {
-      setThread(buildFallback(request ?? '', answers));
+      setThread(buildFallback(request ?? '', answers, intent));
       setAiFallback(true);
     } finally {
       setLoading(false);
@@ -115,17 +134,42 @@ export default function ThreadPreviewScreen() {
     if (!thread || posting) return;
     setPosting(true);
     try {
+      let lat: number | undefined;
+      let lng: number | undefined;
+
+      if (thread.type === 'local') {
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            lat = pos.coords.latitude;
+            lng = pos.coords.longitude;
+          } else {
+            Alert.alert(
+              'Location unavailable',
+              'Your post was created but won\'t appear on the map until location is enabled.'
+            );
+          }
+        } catch {
+          Alert.alert(
+            'Location unavailable',
+            'Your post was created but won\'t appear on the map.'
+          );
+        }
+      }
+
       const res = await api.posts.$post({
         json: {
           title: thread.title,
           body: thread.body,
-          category: thread.category,
+          category: normalizeCategory(thread.category),
           type: thread.type,
           isPaid: thread.isPaid,
           amount: thread.amount,
           urgency: thread.urgency,
           visibility: thread.visibility,
           tags: thread.tags,
+          ...(lat != null && lng != null ? { lat, lng } : {}),
         },
       });
 
@@ -178,6 +222,9 @@ export default function ThreadPreviewScreen() {
     thread.urgency === 'today' ? '24 hours' :
     thread.urgency === 'this_week' ? '7 days' : '3 days';
 
+  const previewHeadline = displayPostTitle(thread.title, thread.body, thread.category);
+  const previewSubtitle = displayPostBody(thread.title, thread.body);
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
@@ -221,8 +268,10 @@ export default function ThreadPreviewScreen() {
               </View>
             </View>
 
-            <Text style={styles.previewTitle}>{thread.title}</Text>
-            <Text style={styles.previewBody}>{thread.body}</Text>
+            <Text style={styles.previewTitle}>{previewHeadline}</Text>
+            {previewSubtitle ? (
+              <Text style={styles.previewBody}>{previewSubtitle}</Text>
+            ) : null}
 
             {(thread.tags ?? []).length > 0 && (
               <View style={styles.tagsRow}>

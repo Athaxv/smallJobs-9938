@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, PaperPlaneTilt, DotsThreeVertical } from 'phosphor-react-native';
+import { ArrowLeft, PaperPlaneTilt } from 'phosphor-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Spacing, FontSize, Radius, Font } from '../../lib/theme';
 import { API_URL } from '../../lib/config';
@@ -193,9 +193,7 @@ export default function ChatScreen() {
             <Text style={styles.threadTitle} numberOfLines={1}>{convTitle}</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.iconBtn}>
-          <DotsThreeVertical size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        <View style={{ width: 38 }} />
       </View>
 
       <View style={styles.contextStrip}>

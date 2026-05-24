@@ -72,7 +72,7 @@ export default function PostEntryScreen() {
           <View style={styles.aiNote}>
             <Sparkle size={13} color={Colors.textPrimary} weight="fill" />
             <Text style={styles.aiNoteText}>
-              AI will ask 1–3 follow-up questions to structure your thread perfectly
+              AI may ask 0–2 quick questions only if something is missing
             </Text>
           </View>
 

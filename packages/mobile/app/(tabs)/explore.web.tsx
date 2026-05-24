@@ -13,10 +13,13 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
 import { MapPin, MagnifyingGlass, Lightning } from 'phosphor-react-native';
 import { router } from 'expo-router';
+import { categoryEmoji, EXPLORE_FILTER_CATEGORIES } from '@template/web/categories';
 import { Colors, Spacing, FontSize, Font, Radius, Shadows } from '../../lib/theme';
 import { API_URL } from '../../lib/config';
+import { displayPostTitle } from '../../lib/postDisplay';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,21 +43,7 @@ interface NearbyPost {
 const DEFAULT_LAT = 19.0760;
 const DEFAULT_LNG = 72.8777;
 
-const CATEGORIES: { id: string; label: string; emoji: string }[] = [
-  { id: 'all', label: 'All', emoji: '🗺️' },
-  { id: 'grocery', label: 'Grocery', emoji: '🛒' },
-  { id: 'health', label: 'Medicine', emoji: '💊' },
-  { id: 'delivery', label: 'Delivery', emoji: '📦' },
-  { id: 'transport', label: 'Ride', emoji: '🚗' },
-  { id: 'tech', label: 'Tech', emoji: '💻' },
-  { id: 'repair', label: 'Repair', emoji: '🔧' },
-  { id: 'teaching', label: 'Tutor', emoji: '📚' },
-  { id: 'other', label: 'Other', emoji: '✨' },
-];
-
-function categoryEmoji(cat: string): string {
-  return CATEGORIES.find(c => c.id === cat)?.emoji ?? '📌';
-}
+const CATEGORIES = EXPLORE_FILTER_CATEGORIES;
 
 function formatTime(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
@@ -67,6 +56,7 @@ function formatTime(ts: number): string {
 // ─── Request Card ─────────────────────────────────────────────────────────────
 
 function RequestCard({ post }: { post: NearbyPost }) {
+  const headline = displayPostTitle(post.title, undefined, post.category);
   return (
     <TouchableOpacity
       style={styles.card}
@@ -79,7 +69,7 @@ function RequestCard({ post }: { post: NearbyPost }) {
         </View>
       </View>
       <View style={styles.cardBody}>
-        <Text style={styles.cardTitle} numberOfLines={2}>{post.title}</Text>
+        <Text style={styles.cardTitle} numberOfLines={2}>{headline}</Text>
         <View style={styles.cardMeta}>
           <MapPin size={11} color={Colors.textSecondary} />
           <Text style={styles.cardMetaText}>{post.distanceKm} km away</Text>
@@ -109,13 +99,27 @@ export default function ExploreScreen() {
   const [loading, setLoading] = useState(false);
   const [activeCategory, setActiveCategory] = useState('all');
   const [search, setSearch] = useState('');
+  const [userLat, setUserLat] = useState(DEFAULT_LAT);
+  const [userLng, setUserLng] = useState(DEFAULT_LNG);
 
-  const fetchNearby = useCallback(async (cat: string) => {
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setUserLat(loc.coords.latitude);
+        setUserLng(loc.coords.longitude);
+      } catch {}
+    })();
+  }, []);
+
+  const fetchNearby = useCallback(async (lat: number, lng: number, cat: string) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        lat: String(DEFAULT_LAT),
-        lng: String(DEFAULT_LNG),
+        lat: String(lat),
+        lng: String(lng),
         radius: '25',
         limit: '50',
       });
@@ -130,7 +134,9 @@ export default function ExploreScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchNearby(activeCategory); }, [activeCategory, fetchNearby]);
+  useEffect(() => {
+    fetchNearby(userLat, userLng, activeCategory);
+  }, [userLat, userLng, activeCategory, fetchNearby]);
 
   const filtered = search.trim()
     ? posts.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase()))

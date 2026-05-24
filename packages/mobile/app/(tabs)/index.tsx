@@ -182,7 +182,7 @@ export default function HomeScreen() {
         </View>
 
         {/* Location strip */}
-        <TouchableOpacity style={styles.locationStrip}>
+        <TouchableOpacity style={styles.locationStrip} onPress={() => router.push('/edit-profile')}>
           <MapPin size={14} color={Colors.textPrimary} weight="fill" />
           <Text style={styles.locationText}>{userLocation ?? 'Set your location'}</Text>
           <Text style={styles.locationChange}>{userLocation ? 'Change' : 'Add'}</Text>
@@ -253,7 +253,7 @@ export default function HomeScreen() {
                 <Text style={styles.sectionTitle}>Near You</Text>
                 <Text style={styles.sectionSub}>Within 2 km{userLocation ? ` · ${userLocation.split(',')[0]}` : ''}</Text>
               </View>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push('/(tabs)/explore')}>
                 <Text style={styles.seeAll}>See all</Text>
               </TouchableOpacity>
             </View>
@@ -284,9 +284,6 @@ export default function HomeScreen() {
                 <Text style={styles.sectionTitle}>Remote & Online</Text>
                 <Text style={styles.sectionSub}>Open to everyone</Text>
               </View>
-              <TouchableOpacity>
-                <Text style={styles.seeAll}>See all</Text>
-              </TouchableOpacity>
             </View>
 
             <View style={styles.threadList}>

@@ -26,9 +26,11 @@ import {
   CaretRight,
   Trophy,
 } from "phosphor-react-native";
+import { categoryEmoji } from "@template/web/categories";
 import { Colors, Spacing, FontSize, Font, Radius, Shadows } from "../../lib/theme";
 import { signOut } from "../../lib/auth";
 import { profileApi, type Post, type TrustSummary, type Profile, type PublicUser } from "../../lib/api";
+import { displayPostTitle } from "../../lib/postDisplay";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -62,22 +64,6 @@ function timeAgo(ts: number | string): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
-}
-
-function categoryIcon(category: string): string {
-  const map: Record<string, string> = {
-    food: "🍱",
-    grocery: "🛒",
-    tech: "💻",
-    transport: "🚗",
-    delivery: "📦",
-    cleaning: "🧹",
-    teaching: "📚",
-    health: "💊",
-    repair: "🔧",
-    other: "✨",
-  };
-  return map[category?.toLowerCase()] ?? "📌";
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -200,9 +186,11 @@ function ActiveTasks({ myOpenPosts, helping }: ActiveTasksProps) {
               style={styles.taskItem}
               onPress={() => router.push(`/thread/${p.id}` as any)}
             >
-              <Text style={styles.taskEmoji}>{categoryIcon(p.category)}</Text>
+              <Text style={styles.taskEmoji}>{categoryEmoji(p.category)}</Text>
               <View style={styles.taskInfo}>
-                <Text style={styles.taskTitle} numberOfLines={1}>{p.title}</Text>
+                <Text style={styles.taskTitle} numberOfLines={1}>
+                  {displayPostTitle(p.title, p.body, p.category)}
+                </Text>
                 <Text style={styles.taskMeta}>
                   {p.responseCount} response{p.responseCount !== 1 ? "s" : ""} · {timeAgo(p.createdAt)}
                 </Text>
@@ -224,9 +212,11 @@ function ActiveTasks({ myOpenPosts, helping }: ActiveTasksProps) {
               style={styles.taskItem}
               onPress={() => router.push(`/thread/${h.post.id}` as any)}
             >
-              <Text style={styles.taskEmoji}>{categoryIcon(h.post.category)}</Text>
+              <Text style={styles.taskEmoji}>{categoryEmoji(h.post.category)}</Text>
               <View style={styles.taskInfo}>
-                <Text style={styles.taskTitle} numberOfLines={1}>{h.post.title}</Text>
+                <Text style={styles.taskTitle} numberOfLines={1}>
+                  {displayPostTitle(h.post.title, h.post.body, h.post.category)}
+                </Text>
                 <Text style={styles.taskMeta}>You're helping · {timeAgo(h.post.createdAt)}</Text>
               </View>
               <View style={styles.statusPillHelping}>
@@ -301,9 +291,11 @@ function History({ posts, responses, tab, onTabChange, loading }: HistoryProps) 
               style={styles.historyItem}
               onPress={() => router.push(`/thread/${p.id}` as any)}
             >
-              <Text style={styles.historyEmoji}>{categoryIcon(p.category)}</Text>
+              <Text style={styles.historyEmoji}>{categoryEmoji(p.category)}</Text>
               <View style={styles.historyInfo}>
-                <Text style={styles.historyTitle} numberOfLines={1}>{p.title}</Text>
+                <Text style={styles.historyTitle} numberOfLines={1}>
+                  {displayPostTitle(p.title, p.body, p.category)}
+                </Text>
                 <Text style={styles.historyMeta}>
                   {p.category} · {timeAgo(p.createdAt)}
                 </Text>

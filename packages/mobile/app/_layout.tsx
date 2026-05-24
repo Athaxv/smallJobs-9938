@@ -96,6 +96,8 @@ export default function RootLayout() {
             <Stack.Screen name="post/preview" options={{ presentation: 'modal', animation: 'none' }} />
             <Stack.Screen name="post/success" options={{ presentation: 'modal', animation: 'fade' }} />
             <Stack.Screen name="chat/[id]" options={{ presentation: 'card', animation: 'slide_from_right' }} />
+            <Stack.Screen name="user/[userId]" options={{ presentation: 'card', animation: 'slide_from_right' }} />
+            <Stack.Screen name="edit-profile" options={{ presentation: 'card', animation: 'slide_from_right' }} />
           </Stack>
         </QueryClientProvider>
       </SafeAreaProvider>

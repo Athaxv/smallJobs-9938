@@ -19,9 +19,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { MapPin, ArrowsClockwise, X, Lightning } from 'phosphor-react-native';
+import { categoryEmoji, EXPLORE_FILTER_CATEGORIES } from '@template/web/categories';
 import { router } from 'expo-router';
 import { Colors, Spacing, FontSize, Font, Radius, Shadows } from '../../lib/theme';
 import { API_URL } from '../../lib/config';
+import { displayPostTitle } from '../../lib/postDisplay';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
@@ -47,21 +49,7 @@ interface NearbyPost {
 const DEFAULT_LAT = 19.0760;
 const DEFAULT_LNG = 72.8777;
 
-const CATEGORIES: { id: string; label: string; emoji: string }[] = [
-  { id: 'all', label: 'All', emoji: '🗺️' },
-  { id: 'grocery', label: 'Grocery', emoji: '🛒' },
-  { id: 'health', label: 'Medicine', emoji: '💊' },
-  { id: 'delivery', label: 'Delivery', emoji: '📦' },
-  { id: 'transport', label: 'Ride', emoji: '🚗' },
-  { id: 'tech', label: 'Tech', emoji: '💻' },
-  { id: 'repair', label: 'Repair', emoji: '🔧' },
-  { id: 'teaching', label: 'Tutor', emoji: '📚' },
-  { id: 'other', label: 'Other', emoji: '✨' },
-];
-
-function categoryEmoji(cat: string): string {
-  return CATEGORIES.find(c => c.id === cat)?.emoji ?? '📌';
-}
+const CATEGORIES = EXPLORE_FILTER_CATEGORIES;
 
 function formatTime(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
@@ -176,6 +164,7 @@ function buildMapHtml(lat: number, lng: number, posts: NearbyPost[], selectedId:
 function RequestCard({
   post, selected, onPress,
 }: { post: NearbyPost; selected: boolean; onPress: () => void }) {
+  const headline = displayPostTitle(post.title, undefined, post.category);
   return (
     <TouchableOpacity
       style={[styles.requestCard, selected && styles.requestCardSelected]}
@@ -188,7 +177,7 @@ function RequestCard({
         </View>
       </View>
       <View style={styles.requestCardBody}>
-        <Text style={styles.requestTitle} numberOfLines={2}>{post.title}</Text>
+        <Text style={styles.requestTitle} numberOfLines={2}>{headline}</Text>
         <View style={styles.requestMeta}>
           <Text style={styles.requestMetaText}>{post.distanceKm} km away</Text>
           <View style={styles.metaDot} />
@@ -213,6 +202,7 @@ function RequestCard({
 // ─── Selected Preview ─────────────────────────────────────────────────────────
 
 function SelectedPreview({ post, onClose }: { post: NearbyPost; onClose: () => void }) {
+  const headline = displayPostTitle(post.title, undefined, post.category);
   return (
     <View style={styles.previewCard}>
       <View style={styles.previewHeader}>
@@ -220,7 +210,7 @@ function SelectedPreview({ post, onClose }: { post: NearbyPost; onClose: () => v
           <Text style={{ fontSize: 22 }}>{categoryEmoji(post.category)}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.previewTitle} numberOfLines={2}>{post.title}</Text>
+          <Text style={styles.previewTitle} numberOfLines={2}>{headline}</Text>
           <View style={styles.previewMeta}>
             <MapPin size={11} color="rgba(255,255,255,0.5)" />
             <Text style={styles.previewMetaText}>{post.distanceKm} km · {post.category}</Text>
@@ -300,7 +290,9 @@ export default function ExploreScreen() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchNearby(userLat, userLng, activeCategory); }, [activeCategory, fetchNearby]);
+  useEffect(() => {
+    fetchNearby(userLat, userLng, activeCategory);
+  }, [userLat, userLng, activeCategory, fetchNearby]);
 
   // Rebuild map HTML when posts or selection changes
   useEffect(() => {
@@ -483,7 +475,7 @@ export default function ExploreScreen() {
               <Text style={styles.emptyBody}>Be the first helper in this area</Text>
               <TouchableOpacity
                 style={styles.emptyAction}
-                onPress={() => router.push('/' as any)}
+                onPress={() => router.replace('/(tabs)' as any)}
               >
                 <Text style={styles.emptyActionText}>Browse all requests</Text>
               </TouchableOpacity>
