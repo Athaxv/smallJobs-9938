@@ -506,7 +506,11 @@ export default function ProfileScreen() {
               {
                 icon: <BellSimple size={17} color={Colors.textSecondary} />,
                 label: "Notifications",
-                onPress: () => Alert.alert("Coming Soon", "Notification settings will be available soon."),
+                onPress: () =>
+                  Alert.alert(
+                    "Notifications",
+                    "Nearby alerts are enabled when location and notifications are allowed on your device.",
+                  ),
               },
               {
                 icon: <Lock size={17} color={Colors.textSecondary} />,

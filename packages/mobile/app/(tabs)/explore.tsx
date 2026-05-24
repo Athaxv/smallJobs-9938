@@ -23,6 +23,7 @@ import { categoryEmoji, EXPLORE_FILTER_CATEGORIES } from '@template/web/categori
 import { router } from 'expo-router';
 import { Colors, Spacing, FontSize, Font, Radius, Shadows } from '../../lib/theme';
 import { API_URL } from '../../lib/config';
+import { syncProfileCoordinates } from '../../lib/sync-profile-location';
 import { displayPostTitle } from '../../lib/postDisplay';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -266,6 +267,7 @@ export default function ExploreScreen() {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setUserLat(loc.coords.latitude);
       setUserLng(loc.coords.longitude);
+      void syncProfileCoordinates(loc.coords.latitude, loc.coords.longitude);
       webViewRef.current?.injectJavaScript(
         `map.setView([${loc.coords.latitude},${loc.coords.longitude}],14);true;`
       );
@@ -273,6 +275,12 @@ export default function ExploreScreen() {
   }, []);
 
   useEffect(() => { requestLocation(); }, [requestLocation]);
+
+  useEffect(() => {
+    if (userLat !== DEFAULT_LAT || userLng !== DEFAULT_LNG) {
+      void syncProfileCoordinates(userLat, userLng);
+    }
+  }, [userLat, userLng]);
 
   // ── Fetch nearby ──
 

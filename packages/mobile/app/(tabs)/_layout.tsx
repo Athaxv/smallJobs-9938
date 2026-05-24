@@ -4,6 +4,7 @@ import { House, Compass, ChatCircle, User, Plus } from 'phosphor-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Font, Shadows } from '../../lib/theme';
 import { useUnreadCount } from '../../lib/useUnreadCount';
+import { PushNotificationSetup } from '../../components/PushNotificationSetup';
 
 function PostFAB({ bottomInset }: { bottomInset: number }) {
   const lift = Platform.OS === 'ios' ? 16 : Math.max(16, bottomInset / 2 + 8);
@@ -30,7 +31,9 @@ export default function TabLayout() {
   const tabBarPaddingBottom = insets.bottom + (Platform.OS === 'android' ? 4 : 0);
 
   return (
-    <Tabs
+    <>
+      <PushNotificationSetup />
+      <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -98,6 +101,7 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    </>
   );
 }
 

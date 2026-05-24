@@ -101,6 +101,7 @@ function ProfileSetupScreen({ session }: { session: any }) {
   const queryClient = useQueryClient();
 
   const [location, setLocation] = useState('');
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [bio, setBio] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -136,6 +137,7 @@ function ProfileSetupScreen({ session }: { session: any }) {
         return;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
       const [addr] = await Location.reverseGeocodeAsync({
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
@@ -162,6 +164,7 @@ function ProfileSetupScreen({ session }: { session: any }) {
           location: location.trim() || undefined,
           bio: bio.trim() || undefined,
           isOnboarded: true,
+          ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
         },
       });
       if (!res.ok) {
