@@ -14,17 +14,31 @@ import {
   Animated,
   PanResponder,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
-import { MapPin, ArrowsClockwise, X, Lightning } from 'phosphor-react-native';
+import { MapPin, ArrowsClockwise, X, Lightning, NavigationArrow, ChatCircle, CaretDown, CaretUp } from 'phosphor-react-native';
 import { categoryEmoji, EXPLORE_FILTER_CATEGORIES } from '@template/web/categories';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Colors, Spacing, FontSize, Font, Radius, Shadows } from '../../lib/theme';
 import { API_URL } from '../../lib/config';
 import { syncProfileCoordinates } from '../../lib/sync-profile-location';
 import { displayPostTitle } from '../../lib/postDisplay';
+import { buildMapHtml, DEFAULT_LAT, DEFAULT_LNG } from '../../lib/map-html';
+import { isPostFeedVisible } from '../../lib/postVisibility';
+import {
+  fetchDrivingRoute,
+  formatRouteDistance,
+  formatRouteDuration,
+  type RouteResult,
+} from '../../lib/fetch-route';
+import { profileApi, type ActiveHelpSummary } from '../../lib/api';
+import { buildExploreRouteParams, isNavigablePost } from '../../lib/explore-route';
+import { openExternalMapsDirections } from '../../lib/active-help';
+import { ARRIVAL_RADIUS_M, haversineDistanceM, REROUTE_DISTANCE_M } from '../../lib/geo';
+import { getTokenAsync } from '../../lib/auth';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
@@ -37,6 +51,8 @@ interface NearbyPost {
   isPaid: boolean;
   amount: number | null;
   status: string;
+  urgency?: string;
+  expiresAt?: number | null;
   responseCount: number;
   createdAt: number;
   lat: number;
@@ -46,9 +62,6 @@ interface NearbyPost {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const DEFAULT_LAT = 19.0760;
-const DEFAULT_LNG = 72.8777;
 
 const CATEGORIES = EXPLORE_FILTER_CATEGORIES;
 
@@ -65,7 +78,8 @@ function formatTime(ts: number): string {
 const SHEET_COLLAPSED = SCREEN_H * 0.72;
 const SHEET_HALF      = SCREEN_H * 0.45;
 const SHEET_FULL      = 170;
-const SNAP_POINTS     = [SHEET_COLLAPSED, SHEET_HALF, SHEET_FULL];
+const ROUTE_SHEET_PEEK = SCREEN_H * 0.58;
+const SNAP_POINTS     = [SHEET_COLLAPSED, SHEET_HALF, SHEET_FULL, ROUTE_SHEET_PEEK];
 
 function snapTo(y: number): number {
   let best = SNAP_POINTS[0];
@@ -74,90 +88,6 @@ function snapTo(y: number): number {
     if (Math.abs(y - p) < bestDist) { best = p; bestDist = Math.abs(y - p); }
   }
   return best;
-}
-
-// ─── Leaflet HTML ─────────────────────────────────────────────────────────────
-
-function buildMapHtml(lat: number, lng: number, posts: NearbyPost[], selectedId: string | null): string {
-  const markers = posts.map(p => ({
-    id: p.id,
-    lat: p.lat,
-    lng: p.lng,
-    emoji: categoryEmoji(p.category),
-    selected: p.id === selectedId,
-    title: p.title,
-  }));
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  html,body,#map { width:100%; height:100%; background:#e8e8e8; }
-  .marker-pin {
-    width:38px; height:38px; border-radius:50%;
-    background:#fff; border:2px solid #e0e0e0;
-    display:flex; align-items:center; justify-content:center;
-    font-size:18px; box-shadow:0 2px 8px rgba(0,0,0,0.15);
-    cursor:pointer; transition:transform 0.15s;
-  }
-  .marker-pin.selected {
-    border:2.5px solid #1a1a1a; background:#f5f5f5;
-    transform:scale(1.2);
-  }
-  .leaflet-control-zoom { display:none; }
-</style>
-</head>
-<body>
-<div id="map"></div>
-<script>
-  var map = L.map('map', { zoomControl:false, attributionControl:false })
-    .setView([${lat}, ${lng}], 14);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    maxZoom:19
-  }).addTo(map);
-
-  var markers = ${JSON.stringify(markers)};
-  markers.forEach(function(m) {
-    var icon = L.divIcon({
-      html: '<div class="marker-pin' + (m.selected ? ' selected' : '') + '">' + m.emoji + '</div>',
-      iconSize:[38,38], iconAnchor:[19,19], className:''
-    });
-    L.marker([m.lat, m.lng], {icon:icon})
-      .addTo(map)
-      .on('click', function() {
-        window.ReactNativeWebView.postMessage(JSON.stringify({type:'markerPress',id:m.id}));
-      });
-  });
-
-  // User location dot
-  if (${lat !== DEFAULT_LAT}) {
-    L.circleMarker([${lat}, ${lng}], {
-      radius:8, fillColor:'#1a1a1a', fillOpacity:1, color:'#fff', weight:2
-    }).addTo(map);
-  }
-
-  // Listen for recenter commands
-  document.addEventListener('message', function(e) {
-    try {
-      var msg = JSON.parse(e.data);
-      if (msg.type === 'recenter') map.setView([msg.lat, msg.lng], 14);
-      if (msg.type === 'focusPost') map.setView([msg.lat, msg.lng], 16);
-    } catch(ex) {}
-  });
-  window.addEventListener('message', function(e) {
-    try {
-      var msg = JSON.parse(e.data);
-      if (msg.type === 'recenter') map.setView([msg.lat, msg.lng], 14);
-      if (msg.type === 'focusPost') map.setView([msg.lat, msg.lng], 16);
-    } catch(ex) {}
-  });
-</script>
-</body>
-</html>`;
 }
 
 // ─── Request Card ─────────────────────────────────────────────────────────────
@@ -242,9 +172,185 @@ function SelectedPreview({ post, onClose }: { post: NearbyPost; onClose: () => v
   );
 }
 
+// ─── Route Banner ─────────────────────────────────────────────────────────────
+
+function RouteBanner({
+  title,
+  distanceM,
+  durationSec,
+  conversationId,
+  onClear,
+  canDismiss,
+  hasArrived,
+  destLat,
+  destLng,
+}: {
+  title: string;
+  distanceM: number | null;
+  durationSec: number | null;
+  conversationId?: string;
+  onClear: () => void;
+  canDismiss: boolean;
+  hasArrived: boolean;
+  destLat: number | null;
+  destLng: number | null;
+}) {
+  return (
+    <View style={styles.routeBanner}>
+      <View style={styles.routeBannerTop}>
+        <NavigationArrow size={16} color="#fff" weight="fill" />
+        <Text style={styles.routeBannerTitle} numberOfLines={1}>
+          {hasArrived ? `Arrived · ${title}` : title}
+        </Text>
+        {canDismiss ? (
+          <TouchableOpacity onPress={onClear} style={styles.routeCloseBtn}>
+            <X size={14} color="rgba(255,255,255,0.7)" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.routeCloseBtn} />
+        )}
+      </View>
+      <View style={styles.routeBannerMeta}>
+        <Text style={styles.routeMetaText}>
+          {hasArrived
+            ? 'You can dismiss this route'
+            : `${distanceM != null ? formatRouteDistance(distanceM) : '—'}${durationSec != null ? ` · ${formatRouteDuration(durationSec)}` : ''}`}
+        </Text>
+      </View>
+      <View style={styles.routeBannerActions}>
+        {destLat != null && destLng != null ? (
+          <TouchableOpacity
+            style={styles.routeMessageBtn}
+            onPress={() => openExternalMapsDirections(destLat, destLng, title)}
+          >
+            <NavigationArrow size={14} color="#0A0A0A" weight="fill" />
+            <Text style={styles.routeMessageText}>Open in Maps</Text>
+          </TouchableOpacity>
+        ) : null}
+        {conversationId ? (
+          <TouchableOpacity
+            style={styles.routeMessageBtn}
+            onPress={() => router.push(`/chat/${conversationId}` as any)}
+          >
+            <ChatCircle size={14} color="#0A0A0A" weight="fill" />
+            <Text style={styles.routeMessageText}>Message</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+// ─── Heading To (route mode sheet) ────────────────────────────────────────────
+
+function HeadingToSheet({
+  title,
+  category,
+  distanceM,
+  durationSec,
+  routeLoading,
+  conversationId,
+  routePostId,
+  hasArrived,
+  destLat,
+  destLng,
+  onMarkArrived,
+  markingArrived,
+}: {
+  title: string;
+  category: string;
+  distanceM: number | null;
+  durationSec: number | null;
+  routeLoading: boolean;
+  conversationId?: string;
+  routePostId: string;
+  hasArrived: boolean;
+  destLat: number | null;
+  destLng: number | null;
+  onMarkArrived: () => void;
+  markingArrived: boolean;
+}) {
+  const meta = hasArrived
+    ? 'You have arrived at the destination'
+    : routeLoading
+      ? 'Calculating route…'
+      : `${distanceM != null ? formatRouteDistance(distanceM) : '—'}${durationSec != null ? ` · ${formatRouteDuration(durationSec)}` : ''}`;
+
+  return (
+    <View style={styles.headingToSection}>
+      <Text style={styles.headingToLabel}>{hasArrived ? 'Arrived at' : 'Heading to'}</Text>
+      <View style={styles.headingToCard}>
+        <View style={styles.headingToHeader}>
+          <View style={styles.headingToEmojiWrap}>
+            <Text style={styles.headingToEmoji}>{categoryEmoji(category)}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headingToTitle} numberOfLines={2}>{title}</Text>
+            <Text style={styles.headingToMeta}>{meta}</Text>
+          </View>
+        </View>
+        <View style={styles.headingToActions}>
+          {destLat != null && destLng != null ? (
+            <TouchableOpacity
+              style={styles.headingToBtnPrimary}
+              onPress={() => openExternalMapsDirections(destLat, destLng, title)}
+            >
+              <NavigationArrow size={14} color="#0A0A0A" weight="fill" />
+              <Text style={styles.headingToBtnPrimaryText}>Open in Maps</Text>
+            </TouchableOpacity>
+          ) : null}
+          {conversationId ? (
+            <TouchableOpacity
+              style={styles.headingToBtnPrimary}
+              onPress={() => router.push(`/chat/${conversationId}` as any)}
+            >
+              <ChatCircle size={14} color="#0A0A0A" weight="fill" />
+              <Text style={styles.headingToBtnPrimaryText}>Message</Text>
+            </TouchableOpacity>
+          ) : null}
+          {!hasArrived ? (
+            <TouchableOpacity
+              style={styles.headingToBtnSecondary}
+              onPress={onMarkArrived}
+              disabled={markingArrived}
+            >
+              {markingArrived
+                ? <ActivityIndicator size="small" color={Colors.textPrimary} />
+                : <Text style={styles.headingToBtnSecondaryText}>I've arrived</Text>}
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={styles.headingToBtnSecondary}
+            onPress={() => router.push(`/thread/${routePostId}` as any)}
+          >
+            <Text style={styles.headingToBtnSecondaryText}>View thread</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ExploreScreen() {
+  const params = useLocalSearchParams<{
+    routePostId?: string;
+    destLat?: string;
+    destLng?: string;
+    destTitle?: string;
+    destCategory?: string;
+    conversationId?: string;
+  }>();
+
+  const routePostId = params.routePostId?.trim() || '';
+  const destLat = params.destLat ? Number(params.destLat) : null;
+  const destLng = params.destLng ? Number(params.destLng) : null;
+  const destTitle = params.destTitle?.trim() || 'Destination';
+  const destCategory = params.destCategory?.trim() || 'other';
+  const conversationId = params.conversationId?.trim() || '';
+  const isRouteMode = Boolean(routePostId && destLat != null && destLng != null && !Number.isNaN(destLat) && !Number.isNaN(destLng));
+
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
   const sheetY = useRef(new Animated.Value(SHEET_COLLAPSED)).current;
@@ -257,6 +363,16 @@ export default function ExploreScreen() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [selectedPost, setSelectedPost] = useState<NearbyPost | null>(null);
   const [mapHtml, setMapHtml] = useState('');
+  const [routeData, setRouteData] = useState<RouteResult | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [otherNearbyExpanded, setOtherNearbyExpanded] = useState(false);
+  const [activeHelp, setActiveHelp] = useState<ActiveHelpSummary | null>(null);
+  const [hasArrived, setHasArrived] = useState(false);
+  const [markingArrived, setMarkingArrived] = useState(false);
+  const [routePostStatus, setRoutePostStatus] = useState<string>('open');
+  const lastRouteFromRef = useRef<{ lat: number; lng: number } | null>(null);
+  const routeDataRef = useRef<RouteResult | null>(null);
+  const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
 
   // ── Location ──
 
@@ -276,6 +392,150 @@ export default function ExploreScreen() {
 
   useEffect(() => { requestLocation(); }, [requestLocation]);
 
+  const updateUserOnMap = useCallback((lat: number, lng: number) => {
+    webViewRef.current?.injectJavaScript(
+      `window.ReactNativeWebView && document.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'updateUser', lat: ${lat}, lng: ${lng} }) }));true;`,
+    );
+  }, []);
+
+  const refreshActiveHelp = useCallback(async () => {
+    try {
+      const data = await profileApi.getActiveHelp();
+      setActiveHelp(data.activeHelp);
+      if (data.activeHelp && isRouteMode && routePostId === data.activeHelp.post.id) {
+        setRoutePostStatus(data.activeHelp.post.status);
+      }
+      return data.activeHelp;
+    } catch {
+      return null;
+    }
+  }, [isRouteMode, routePostId]);
+
+  const clearRouteMode = useCallback(() => {
+    setRouteData(null);
+    routeDataRef.current = null;
+    setHasArrived(false);
+    setActiveHelp(null);
+    lastRouteFromRef.current = null;
+    router.replace('/(tabs)/explore' as any);
+  }, []);
+
+  const markArrived = useCallback(async () => {
+    if (markingArrived) return;
+    let help = activeHelp;
+    if (!help) {
+      help = await refreshActiveHelp();
+    }
+    if (!help) {
+      Alert.alert('Error', 'No active help session found.');
+      return;
+    }
+    setMarkingArrived(true);
+    try {
+      await profileApi.markArrived(help.responseId);
+      setHasArrived(true);
+      setActiveHelp(null);
+    } catch {
+      Alert.alert('Error', 'Could not mark arrival. Try again.');
+    } finally {
+      setMarkingArrived(false);
+    }
+  }, [activeHelp, markingArrived, refreshActiveHelp]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshActiveHelp().then((help) => {
+        if (!help || !isNavigablePost(help.post) || help.post.status !== 'open') return;
+        if (isRouteMode && routePostId === help.post.id) return;
+        router.setParams(buildExploreRouteParams(help.post, help.conversationId) as any);
+      });
+    }, [refreshActiveHelp, isRouteMode, routePostId]),
+  );
+
+  useEffect(() => {
+    if (isRouteMode) void refreshActiveHelp();
+  }, [isRouteMode, routePostId, refreshActiveHelp]);
+
+  useEffect(() => {
+    setHasArrived(false);
+  }, [routePostId]);
+
+  useEffect(() => {
+    if (!isRouteMode) {
+      locationWatchRef.current?.remove();
+      locationWatchRef.current = null;
+      lastRouteFromRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted' || cancelled) return;
+      locationWatchRef.current?.remove();
+      locationWatchRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          distanceInterval: 15,
+          timeInterval: 4000,
+        },
+        (loc) => {
+          const lat = loc.coords.latitude;
+          const lng = loc.coords.longitude;
+          setUserLat(lat);
+          setUserLng(lng);
+          void syncProfileCoordinates(lat, lng);
+          updateUserOnMap(lat, lng);
+        },
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      locationWatchRef.current?.remove();
+      locationWatchRef.current = null;
+    };
+  }, [isRouteMode, updateUserOnMap]);
+
+  useEffect(() => {
+    if (!isRouteMode || !routePostId) return;
+
+    const poll = async () => {
+      try {
+        const token = await getTokenAsync();
+        const res = await fetch(`${API_URL}/api/posts/${routePostId}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setRoutePostStatus(data.post.status);
+          if (data.post.status !== 'open') {
+            Alert.alert(
+              'Task ended',
+              data.post.status === 'expired'
+                ? 'This request has expired.'
+                : 'This request has been closed.',
+            );
+            clearRouteMode();
+          }
+        }
+      } catch {}
+    };
+
+    void poll();
+    const id = setInterval(poll, 30000);
+    return () => clearInterval(id);
+  }, [isRouteMode, routePostId, clearRouteMode]);
+
+  useEffect(() => {
+    if (!isRouteMode || destLat == null || destLng == null || hasArrived || markingArrived) return;
+    if (userLat === DEFAULT_LAT && userLng === DEFAULT_LNG) return;
+    const dist = haversineDistanceM(userLat, userLng, destLat, destLng);
+    if (dist <= ARRIVAL_RADIUS_M) {
+      void markArrived();
+    }
+  }, [userLat, userLng, destLat, destLng, isRouteMode, hasArrived, markingArrived, markArrived]);
+
   useEffect(() => {
     if (userLat !== DEFAULT_LAT || userLng !== DEFAULT_LNG) {
       void syncProfileCoordinates(userLat, userLng);
@@ -293,7 +553,7 @@ export default function ExploreScreen() {
       if (cat !== 'all') params.set('category', cat);
       const res = await fetch(`${API_URL}/api/posts/nearby?${params}`, { credentials: 'include' });
       const data = await res.json();
-      if (data.ok) setPosts(data.posts);
+      if (data.ok) setPosts(data.posts.filter(isPostFeedVisible));
     } catch {}
     finally { setLoading(false); }
   }, []);
@@ -302,10 +562,69 @@ export default function ExploreScreen() {
     fetchNearby(userLat, userLng, activeCategory);
   }, [userLat, userLng, activeCategory, fetchNearby]);
 
-  // Rebuild map HTML when posts or selection changes
   useEffect(() => {
-    setMapHtml(buildMapHtml(userLat, userLng, posts, selectedPost?.id ?? null));
-  }, [posts, selectedPost, userLat, userLng]);
+    if (isRouteMode) {
+      sheetYVal.current = ROUTE_SHEET_PEEK;
+      Animated.spring(sheetY, { toValue: ROUTE_SHEET_PEEK, useNativeDriver: false, tension: 80, friction: 12 }).start();
+    }
+  }, [isRouteMode, sheetY]);
+
+  useEffect(() => {
+    if (!isRouteMode || destLat == null || destLng == null) {
+      setRouteData(null);
+      lastRouteFromRef.current = null;
+      return;
+    }
+    if (userLat === DEFAULT_LAT && userLng === DEFAULT_LNG) return;
+
+    const last = lastRouteFromRef.current;
+    if (last && routeDataRef.current) {
+      const moved = haversineDistanceM(last.lat, last.lng, userLat, userLng);
+      if (moved < REROUTE_DISTANCE_M) return;
+    }
+
+    lastRouteFromRef.current = { lat: userLat, lng: userLng };
+
+    let cancelled = false;
+    setRouteLoading(true);
+    void fetchDrivingRoute(userLat, userLng, destLat, destLng).then((result) => {
+      if (!cancelled) {
+        routeDataRef.current = result;
+        setRouteData(result);
+        setRouteLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [isRouteMode, destLat, destLng, userLat, userLng]);
+
+  useEffect(() => {
+    if (isRouteMode && destLat != null && destLng != null) {
+      setMapHtml(buildMapHtml({
+        userLat,
+        userLng,
+        markers: [],
+        routePolyline: routeData?.coordinates ?? [],
+        routeDestination: {
+          lat: destLat,
+          lng: destLng,
+          emoji: categoryEmoji(destCategory),
+        },
+      }));
+      return;
+    }
+
+    setMapHtml(buildMapHtml({
+      userLat,
+      userLng,
+      markers: posts.map(p => ({
+        id: p.id,
+        lat: p.lat,
+        lng: p.lng,
+        emoji: categoryEmoji(p.category),
+      })),
+      selectedId: selectedPost?.id ?? null,
+    }));
+  }, [posts, selectedPost, userLat, userLng, isRouteMode, destLat, destLng, destCategory, routeData]);
 
   // ── Bottom sheet pan ──
 
@@ -365,6 +684,17 @@ export default function ExploreScreen() {
   };
 
   const activeCount = posts.length;
+  const otherNearbyPosts = isRouteMode
+    ? posts.filter(p => p.id !== routePostId)
+    : posts;
+  const isLockedRoute = Boolean(
+    isRouteMode &&
+    activeHelp &&
+    activeHelp.post.id === routePostId &&
+    !hasArrived &&
+    routePostStatus === 'open',
+  );
+  const canDismissRoute = !isLockedRoute;
 
   return (
     <View style={styles.root}>
@@ -396,7 +726,9 @@ export default function ExploreScreen() {
             <Text style={styles.headerTitle}>Explore</Text>
           </View>
           <View style={styles.headerRight}>
-            {loading && <ActivityIndicator size="small" color={Colors.textPrimary} style={{ marginRight: 8 }} />}
+            {(loading || routeLoading) && (
+              <ActivityIndicator size="small" color={Colors.textPrimary} style={{ marginRight: 8 }} />
+            )}
             <TouchableOpacity style={styles.iconBtn} onPress={recenter}>
               <ArrowsClockwise size={16} color={Colors.textPrimary} />
             </TouchableOpacity>
@@ -404,6 +736,7 @@ export default function ExploreScreen() {
         </View>
 
         {/* Category filters */}
+        {!isRouteMode && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -424,9 +757,25 @@ export default function ExploreScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
+        )}
+
+        {/* Route banner */}
+        {isRouteMode && (
+          <RouteBanner
+            title={destTitle}
+            distanceM={routeData?.distanceM ?? null}
+            durationSec={routeData?.durationSec ?? null}
+            conversationId={conversationId || undefined}
+            onClear={clearRouteMode}
+            canDismiss={canDismissRoute}
+            hasArrived={hasArrived}
+            destLat={destLat}
+            destLng={destLng}
+          />
+        )}
 
         {/* Activity banner */}
-        {activeCount > 0 && (
+        {!isRouteMode && activeCount > 0 && (
           <View style={styles.activityBanner}>
             <View style={styles.activityDot} />
             <Text style={styles.activityText}>
@@ -444,10 +793,62 @@ export default function ExploreScreen() {
         </View>
 
         {/* Selected preview */}
-        {selectedPost && (
+        {!isRouteMode && selectedPost && (
           <SelectedPreview post={selectedPost} onClose={() => setSelectedPost(null)} />
         )}
 
+        {isRouteMode ? (
+          <>
+            <HeadingToSheet
+              title={destTitle}
+              category={destCategory}
+              distanceM={routeData?.distanceM ?? null}
+              durationSec={routeData?.durationSec ?? null}
+              routeLoading={routeLoading}
+              conversationId={conversationId || undefined}
+              routePostId={routePostId}
+              hasArrived={hasArrived}
+              destLat={destLat}
+              destLng={destLng}
+              onMarkArrived={markArrived}
+              markingArrived={markingArrived}
+            />
+            <TouchableOpacity
+              style={styles.otherNearbyToggle}
+              onPress={() => setOtherNearbyExpanded(v => !v)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.otherNearbyToggleText}>
+                Other nearby ({otherNearbyPosts.length})
+              </Text>
+              {otherNearbyExpanded
+                ? <CaretUp size={14} color={Colors.textSecondary} />
+                : <CaretDown size={14} color={Colors.textSecondary} />}
+            </TouchableOpacity>
+            {otherNearbyExpanded && (
+              <ScrollView
+                style={styles.sheetScroll}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.sheetScrollContent}
+              >
+                {otherNearbyPosts.length === 0 ? (
+                  <Text style={styles.otherNearbyEmpty}>No other active requests nearby</Text>
+                ) : (
+                  otherNearbyPosts.map(post => (
+                    <RequestCard
+                      key={post.id}
+                      post={post}
+                      selected={false}
+                      onPress={() => router.push(`/thread/${post.id}` as any)}
+                    />
+                  ))
+                )}
+                <View style={{ height: 80 }} />
+              </ScrollView>
+            )}
+          </>
+        ) : (
+          <>
         {/* Sheet header */}
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>
@@ -506,6 +907,8 @@ export default function ExploreScreen() {
           )}
           <View style={{ height: 120 }} />
         </ScrollView>
+          </>
+        )}
       </Animated.View>
     </View>
   );
@@ -557,6 +960,35 @@ const styles = StyleSheet.create({
   },
   activityDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.success },
   activityText: { fontSize: FontSize.caption, fontFamily: Font.sansMedium, color: Colors.textPrimary },
+
+  routeBanner: {
+    marginHorizontal: Spacing.screenH,
+    marginTop: Spacing.sm,
+    backgroundColor: '#0A0A0A',
+    borderRadius: Radius.xl,
+    padding: Spacing.base,
+    ...Shadows.sm,
+  },
+  routeBannerTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  routeBannerTitle: {
+    flex: 1,
+    fontSize: FontSize.body,
+    fontFamily: Font.sansSemibold,
+    color: '#fff',
+  },
+  routeCloseBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  routeBannerMeta: { marginTop: 6, marginBottom: Spacing.sm },
+  routeBannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  routeMetaText: { fontSize: FontSize.caption, fontFamily: Font.sans, color: 'rgba(255,255,255,0.65)' },
+  routeMessageBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#fff', borderRadius: Radius.lg, paddingVertical: 10, paddingHorizontal: 12,
+  },
+  routeMessageText: { fontSize: FontSize.bodyS, fontFamily: Font.sansSemibold, color: '#0A0A0A' },
 
   sheet: {
     position: 'absolute', left: 0, right: 0, bottom: 0,
@@ -647,4 +1079,51 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill, borderWidth: 1.5, borderColor: Colors.borderStrong,
   },
   emptyActionText: { fontSize: FontSize.bodyS, fontFamily: Font.sansMedium, color: Colors.textPrimary },
+
+  headingToSection: { paddingHorizontal: Spacing.screenH, paddingBottom: Spacing.sm },
+  headingToLabel: {
+    fontSize: FontSize.caption, fontFamily: Font.sansSemibold,
+    color: Colors.textPlaceholder, textTransform: 'uppercase', letterSpacing: 0.5,
+    marginBottom: Spacing.sm,
+  },
+  headingToCard: {
+    backgroundColor: Colors.surfaceSoft, borderRadius: Radius.lg,
+    padding: Spacing.base, gap: Spacing.md,
+  },
+  headingToHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  headingToEmojiWrap: {
+    width: 44, height: 44, borderRadius: Radius.md,
+    backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center',
+  },
+  headingToEmoji: { fontSize: 22 },
+  headingToTitle: {
+    fontSize: FontSize.body, fontFamily: Font.sansSemibold,
+    color: Colors.textPrimary, lineHeight: 22,
+  },
+  headingToMeta: {
+    fontSize: FontSize.caption, fontFamily: Font.sans,
+    color: Colors.textSecondary, marginTop: 4,
+  },
+  headingToActions: { flexDirection: 'row', gap: Spacing.sm },
+  headingToBtnPrimary: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: Colors.primary, borderRadius: Radius.lg, paddingVertical: 11,
+  },
+  headingToBtnPrimaryText: { fontSize: FontSize.bodyS, fontFamily: Font.sansSemibold, color: '#fff' },
+  headingToBtnSecondary: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.background, borderRadius: Radius.lg, paddingVertical: 11,
+    borderWidth: 1.5, borderColor: Colors.border,
+  },
+  headingToBtnSecondaryText: { fontSize: FontSize.bodyS, fontFamily: Font.sansMedium, color: Colors.textPrimary },
+  otherNearbyToggle: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: Spacing.screenH, paddingVertical: Spacing.sm,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+  },
+  otherNearbyToggleText: { fontSize: FontSize.bodyS, fontFamily: Font.sansMedium, color: Colors.textSecondary },
+  otherNearbyEmpty: {
+    fontSize: FontSize.bodyS, fontFamily: Font.sans, color: Colors.textPlaceholder,
+    textAlign: 'center', paddingVertical: Spacing.lg,
+  },
 });

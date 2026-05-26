@@ -12,8 +12,23 @@ const URGENCY_EXPIRES: Record<string, string> = {
   flexible: '3 days',
 };
 
+function formatExpiresIn(expiresAt?: string | number | null): string {
+  if (!expiresAt) return '24 hours';
+  const ms = typeof expiresAt === 'number' ? expiresAt : new Date(expiresAt).getTime();
+  const diff = ms - Date.now();
+  if (diff <= 0) return 'Expired';
+  const hours = Math.floor(diff / (60 * 60 * 1000));
+  if (hours < 1) return `${Math.max(1, Math.floor(diff / 60000))} min`;
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 export default function PostSuccessScreen() {
-  const { postId, urgency } = useLocalSearchParams<{ postId: string; urgency: string }>();
+  const { postId, urgency, expiresAt } = useLocalSearchParams<{
+    postId: string;
+    urgency: string;
+    expiresAt?: string;
+  }>();
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -24,7 +39,9 @@ export default function PostSuccessScreen() {
     ]).start();
   }, []);
 
-  const expiresIn = URGENCY_EXPIRES[urgency ?? 'flexible'] ?? '3 days';
+  const expiresIn = expiresAt
+    ? formatExpiresIn(expiresAt)
+    : (URGENCY_EXPIRES[urgency ?? 'today'] ?? '24 hours');
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>

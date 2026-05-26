@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, PaperPlaneTilt } from 'phosphor-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Spacing, FontSize, Radius, Font } from '../../lib/theme';
@@ -35,6 +35,8 @@ function initials(name: string) {
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = useSafeAreaInsets();
+  const inputBarPadding = insets.bottom + Spacing.md;
   const [myId, setMyId] = useState('');
   useEffect(() => { getSession().then((u) => setMyId(u?.id ?? '')); }, []);
 
@@ -238,7 +240,7 @@ export default function ChatScreen() {
           )}
         />
 
-        <View style={styles.inputBar}>
+        <View style={[styles.inputBar, { paddingBottom: inputBarPadding }]}>
           <View style={styles.inputWrap}>
             <TextInput
               style={styles.input}
@@ -316,7 +318,7 @@ const styles = StyleSheet.create({
   bubbleTime: { fontSize: 11, fontFamily: Font.sans, color: Colors.textPlaceholder, alignSelf: 'flex-end' },
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.sm,
-    paddingHorizontal: Spacing.screenH, paddingVertical: Spacing.md, paddingBottom: Spacing.lg,
+    paddingHorizontal: Spacing.screenH, paddingTop: Spacing.md,
     backgroundColor: Colors.background, borderTopWidth: 1, borderTopColor: Colors.border,
   },
   inputWrap: {

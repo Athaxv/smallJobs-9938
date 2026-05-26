@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import {
   ArrowLeft, Sparkle, MapPin, Globe, CurrencyCircleDollar,
@@ -11,6 +11,7 @@ import {
 } from 'phosphor-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { normalizeCategory } from '@template/web/categories';
+import { inferUrgencyFromRequestAndAnswers } from '@template/web/ai-prompts';
 import { Colors, Spacing, FontSize, Radius, Shadows, Font } from '../../lib/theme';
 import { api, aiApi, type StructuredThread } from '../../lib/api';
 import { displayPostTitle, displayPostBody } from '../../lib/postDisplay';
@@ -70,8 +71,7 @@ function buildFallback(
     amount = match ? parseInt(match[1]) : 300;
   }
 
-  const hasUrgent = /\b(asap|urgent|today|tonight|now)\b/.test(lower);
-  const hasWeek = /\b(this week|weekend|tomorrow)\b/.test(lower);
+  const combinedUrgency = inferUrgencyFromRequestAndAnswers(request, answers) ?? 'today';
 
   return {
     title: request.length > 70 ? request.substring(0, 67) + '...' : request,
@@ -81,7 +81,7 @@ function buildFallback(
     tags,
     isPaid,
     amount,
-    urgency: hasUrgent ? 'today' : hasWeek ? 'this_week' : 'flexible',
+    urgency: combinedUrgency,
     visibility,
   };
 }
@@ -106,6 +106,8 @@ export default function ThreadPreviewScreen() {
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
   const [aiFallback, setAiFallback] = useState(false);
+  const insets = useSafeAreaInsets();
+  const bottomBarPadding = insets.bottom + Spacing.md;
 
   useEffect(() => { structureThread(); }, []);
 
@@ -167,6 +169,7 @@ export default function ThreadPreviewScreen() {
           isPaid: thread.isPaid,
           amount: thread.amount,
           urgency: thread.urgency,
+          ...(thread.expiresAt ? { expiresAt: thread.expiresAt } : {}),
           visibility: thread.visibility,
           tags: thread.tags,
           ...(lat != null && lng != null ? { lat, lng } : {}),
@@ -179,10 +182,14 @@ export default function ThreadPreviewScreen() {
         return;
       }
 
-      const data = await res.json() as { ok: boolean; post: { id: string } };
+      const data = await res.json() as { ok: boolean; post: { id: string; expiresAt?: string | number } };
       router.replace({
         pathname: '/post/success',
-        params: { postId: data.post.id, urgency: thread.urgency },
+        params: {
+          postId: data.post.id,
+          urgency: thread.urgency,
+          expiresAt: thread.expiresAt ?? String(data.post.expiresAt ?? ''),
+        },
       });
     } catch (e) {
       Alert.alert('Error', 'Network error. Check your connection and try again.');
@@ -217,10 +224,11 @@ export default function ThreadPreviewScreen() {
   const typeLabel =
     thread.type === 'local' ? 'Nearby' :
     thread.type === 'remote' ? 'Remote' : 'Interest';
-  const expireLabel =
+  const expireLabel = thread.timingSummary ?? (
     thread.urgency === 'asap' ? '2 hours' :
     thread.urgency === 'today' ? '24 hours' :
-    thread.urgency === 'this_week' ? '7 days' : '3 days';
+    thread.urgency === 'this_week' ? '7 days' : '3 days'
+  );
 
   const previewHeadline = displayPostTitle(thread.title, thread.body, thread.category);
   const previewSubtitle = displayPostBody(thread.title, thread.body);
@@ -301,7 +309,7 @@ export default function ThreadPreviewScreen() {
             <View style={styles.visibilityInfo}>
               <Text style={styles.visibilityTitle}>Urgency · Expires</Text>
               <Text style={styles.visibilityText}>
-                {URGENCY_LABELS[thread.urgency]} · auto-closes in {expireLabel}
+                {URGENCY_LABELS[thread.urgency]} · {expireLabel}
               </Text>
             </View>
           </View>
@@ -312,10 +320,10 @@ export default function ThreadPreviewScreen() {
           <Text style={styles.editText}>Something wrong? Go back and edit</Text>
         </TouchableOpacity>
 
-        <View style={{ height: 120 }} />
+        <View style={{ height: 120 + insets.bottom }} />
       </ScrollView>
 
-      <View style={styles.bottomBar}>
+      <View style={[styles.bottomBar, { paddingBottom: bottomBarPadding }]}>
         <TouchableOpacity
           style={[styles.ctaBtn, posting && styles.ctaBtnDisabled]}
           activeOpacity={0.88}
@@ -411,7 +419,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary, textDecorationLine: 'underline',
   },
   bottomBar: {
-    paddingHorizontal: Spacing.screenH, paddingTop: Spacing.md, paddingBottom: Spacing.xl,
+    paddingHorizontal: Spacing.screenH, paddingTop: Spacing.md,
     backgroundColor: Colors.background, borderTopWidth: 1, borderTopColor: Colors.border,
   },
   ctaBtn: {

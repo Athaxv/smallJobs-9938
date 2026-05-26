@@ -7,11 +7,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bell, MagnifyingGlass, SlidersHorizontal, MapPin, X } from 'phosphor-react-native';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, FontSize, Font, Radius } from '../../lib/theme';
 import ThreadCard from '../../components/ThreadCard';
 import { CATEGORIES } from '../../lib/mockData';
 import { api, profileApi } from '../../lib/api';
 import { getSession, type AuthUser } from '../../lib/auth';
+import { isPostFeedVisible } from '../../lib/postVisibility';
 
 type FilterKey = 'all' | 'paid' | 'free' | 'urgent' | string;
 
@@ -39,6 +41,8 @@ interface PostFromAPI {
   amount?: number | null;
   distance?: string | null;
   status: string;
+  urgency?: string;
+  expiresAt?: string | number | null;
   responseCount: number;
   createdAt: string | number;
   author: {
@@ -100,34 +104,44 @@ export default function HomeScreen() {
   const [searchFocused, setSearchFocused] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
 
-  const fetchPosts = useCallback(async () => {
+  const fetchPosts = useCallback(async (filter: FilterKey = 'all') => {
     try {
-      const res = await api.posts.$get({ query: { limit: '40', page: '1' } });
+      const query: Record<string, string> = { limit: '40', page: '1' };
+      if (filter === 'urgent') query.urgency = 'asap';
+      const res = await api.posts.$get({ query });
       if (res.ok) {
         const data = await res.json() as { ok: boolean; posts: PostFromAPI[] };
-        setPosts(data.posts ?? []);
+        setPosts((data.posts ?? []).filter(isPostFeedVisible));
       }
-    } catch (e) {
+    } catch {
       // silently fail — show empty state
     } finally {
       setLoadingPosts(false);
     }
   }, []);
 
-  useEffect(() => { fetchPosts(); }, []);
+  useEffect(() => { fetchPosts(activeFilter); }, [activeFilter, fetchPosts]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void fetchPosts(activeFilter);
+    }, [fetchPosts, activeFilter]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchPosts();
+    await fetchPosts(activeFilter);
     setRefreshing(false);
-  }, [fetchPosts]);
+  }, [fetchPosts, activeFilter]);
 
   const filteredPosts = useMemo(() => {
     let result = posts;
     if (activeFilter === 'paid') result = result.filter(p => p.isPaid);
     else if (activeFilter === 'free') result = result.filter(p => !p.isPaid);
     else if (activeFilter === 'urgent') result = result.filter(p =>
-      (p.tags ?? []).some(t => t === 'urgent') || p.category === 'emergency'
+      p.urgency === 'asap' ||
+      (p.tags ?? []).some(t => t === 'urgent') ||
+      p.category === 'emergency'
     );
     else if (activeFilter !== 'all') result = result.filter(p => p.category === activeFilter);
 

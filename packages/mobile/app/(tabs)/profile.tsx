@@ -31,6 +31,12 @@ import { Colors, Spacing, FontSize, Font, Radius, Shadows } from "../../lib/them
 import { signOut } from "../../lib/auth";
 import { profileApi, type Post, type TrustSummary, type Profile, type PublicUser } from "../../lib/api";
 import { displayPostTitle } from "../../lib/postDisplay";
+import { isNavigablePost, navigateAfterJoin, navigateToExploreRoute } from "../../lib/explore-route";
+import {
+  getPostDisplayStatus,
+  isPostFeedVisible,
+  type PostDisplayStatus,
+} from "../../lib/postVisibility";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,6 +73,22 @@ function timeAgo(ts: number | string): string {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function PostStatusPill({ status }: { status: PostDisplayStatus }) {
+  const pillStyle =
+    status === "open" ? styles.statusPillOpen :
+    status === "expired" ? styles.statusPillExpired : styles.statusPillClosed;
+  const textStyle =
+    status === "open" ? styles.statusTextOpen :
+    status === "expired" ? styles.statusTextExpired : styles.statusTextClosed;
+  const label = status === "open" ? "Open" : status === "expired" ? "Expired" : "Closed";
+
+  return (
+    <View style={pillStyle}>
+      <Text style={textStyle}>{label}</Text>
+    </View>
+  );
+}
 
 function TrustBadge({ badge }: { badge: string | null }) {
   if (!badge) return null;
@@ -150,11 +172,13 @@ function TrustCard({ trust, profile, userEmail }: TrustCardProps) {
 
 interface ActiveTasksProps {
   myOpenPosts: Post[];
-  helping: { responseId: string; post: Post }[];
+  helping: { responseId: string; conversationId?: string; post: Post }[];
 }
 
 function ActiveTasks({ myOpenPosts, helping }: ActiveTasksProps) {
-  if (myOpenPosts.length === 0 && helping.length === 0) {
+  const visibleOpenPosts = myOpenPosts.filter(isPostFeedVisible);
+
+  if (visibleOpenPosts.length === 0 && helping.length === 0) {
     return (
       <View style={styles.sectionCard}>
         <View style={styles.sectionCardHeader}>
@@ -177,10 +201,10 @@ function ActiveTasks({ myOpenPosts, helping }: ActiveTasksProps) {
         <Text style={styles.sectionCardTitle}>Active Tasks</Text>
       </View>
 
-      {myOpenPosts.length > 0 && (
+      {visibleOpenPosts.length > 0 && (
         <View style={styles.taskGroup}>
           <Text style={styles.taskGroupLabel}>My open requests</Text>
-          {myOpenPosts.slice(0, 3).map((p) => (
+          {visibleOpenPosts.slice(0, 3).map((p) => (
             <TouchableOpacity
               key={p.id}
               style={styles.taskItem}
@@ -195,9 +219,7 @@ function ActiveTasks({ myOpenPosts, helping }: ActiveTasksProps) {
                   {p.responseCount} response{p.responseCount !== 1 ? "s" : ""} · {timeAgo(p.createdAt)}
                 </Text>
               </View>
-              <View style={styles.statusPillOpen}>
-                <Text style={styles.statusTextOpen}>Open</Text>
-              </View>
+              <PostStatusPill status={getPostDisplayStatus(p)} />
             </TouchableOpacity>
           ))}
         </View>
@@ -210,7 +232,15 @@ function ActiveTasks({ myOpenPosts, helping }: ActiveTasksProps) {
             <TouchableOpacity
               key={h.responseId}
               style={styles.taskItem}
-              onPress={() => router.push(`/thread/${h.post.id}` as any)}
+              onPress={() => {
+                if (isNavigablePost(h.post) && h.conversationId) {
+                  navigateToExploreRoute(h.post, h.conversationId);
+                } else if (h.conversationId) {
+                  navigateAfterJoin(h.post, h.conversationId);
+                } else {
+                  router.push(`/thread/${h.post.id}` as any);
+                }
+              }}
             >
               <Text style={styles.taskEmoji}>{categoryEmoji(h.post.category)}</Text>
               <View style={styles.taskInfo}>
@@ -219,9 +249,7 @@ function ActiveTasks({ myOpenPosts, helping }: ActiveTasksProps) {
                 </Text>
                 <Text style={styles.taskMeta}>You're helping · {timeAgo(h.post.createdAt)}</Text>
               </View>
-              <View style={styles.statusPillHelping}>
-                <Text style={styles.statusTextHelping}>Active</Text>
-              </View>
+              <PostStatusPill status={getPostDisplayStatus(h.post)} />
             </TouchableOpacity>
           ))}
         </View>
@@ -300,15 +328,7 @@ function History({ posts, responses, tab, onTabChange, loading }: HistoryProps) 
                   {p.category} · {timeAgo(p.createdAt)}
                 </Text>
               </View>
-              <View style={[
-                p.status === "open" ? styles.statusPillOpen : styles.statusPillClosed,
-              ]}>
-                <Text style={[
-                  p.status === "open" ? styles.statusTextOpen : styles.statusTextClosed,
-                ]}>
-                  {p.status === "open" ? "Open" : "Closed"}
-                </Text>
-              </View>
+              <PostStatusPill status={getPostDisplayStatus(p)} />
             </TouchableOpacity>
           ))}
         </View>
@@ -330,7 +350,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [trust, setTrust] = useState<TrustSummary | null>(null);
   const [myOpenPosts, setMyOpenPosts] = useState<Post[]>([]);
-  const [helping, setHelping] = useState<{ responseId: string; post: Post }[]>([]);
+  const [helping, setHelping] = useState<{ responseId: string; conversationId?: string; post: Post }[]>([]);
   const [postedPosts, setPostedPosts] = useState<Post[]>([]);
   const [helpedItems, setHelpedItems] = useState<{ responseId: string; responseStatus: string; post: Post }[]>([]);
 
@@ -923,6 +943,17 @@ const styles = StyleSheet.create({
     fontSize: FontSize.caption,
     fontFamily: Font.sansMedium,
     color: Colors.textSecondary,
+  },
+  statusPillExpired: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+    backgroundColor: "#FEE2E2",
+  },
+  statusTextExpired: {
+    fontSize: FontSize.caption,
+    fontFamily: Font.sansMedium,
+    color: "#B91C1C",
   },
 
   // Tab chips
