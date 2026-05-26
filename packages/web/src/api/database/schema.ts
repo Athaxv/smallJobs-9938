@@ -41,6 +41,11 @@ export const posts = sqliteTable("posts", {
   lng: real("lng"),                                     // approximate longitude
   tags: text("tags"),                                   // JSON array of tag strings
   status: text("status", { enum: ["open", "closed", "expired"] }).notNull().default("open"),
+  urgency: text("urgency", { enum: ["asap", "today", "this_week", "flexible"] })
+    .notNull()
+    .default("today"),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+  closedAt: integer("closed_at", { mode: "timestamp_ms" }),
   responseCount: integer("response_count").default(0).notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

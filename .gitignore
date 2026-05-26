@@ -72,3 +72,6 @@ scripts/
 !packages/mobile/scripts/
 packages/mobile/scripts/*
 !packages/mobile/scripts/generate-ios-certs.py
+
+
+realai-8a54d-firebase-adminsdk-fbsvc-f38ef6792e.json
