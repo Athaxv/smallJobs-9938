@@ -8,6 +8,14 @@ import { authMiddleware, requireAuth } from '../middleware/auth';
 import type { auth } from '../auth';
 import { CATEGORY_IDS, normalizeCategory } from '../../shared/categories';
 import { notifyNewPost } from '../services/notify-new-post';
+import {
+  activeOpenPostsCondition,
+  expireStalePosts,
+  isUrgency,
+  resolveExpiresAtInput,
+  urgentFirstOrder,
+  type Urgency,
+} from '../lib/post-expiry';
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
@@ -43,6 +51,7 @@ const createPostSchema = z.object({
   lat: z.number().optional(),
   lng: z.number().optional(),
   urgency: z.enum(['asap', 'today', 'this_week', 'flexible']).optional(),
+  expiresAt: z.string().optional(),
   location: z.string().optional(),
   tags: z.array(z.string()).optional(),
   visibility: z.string().optional(),
@@ -51,10 +60,15 @@ const createPostSchema = z.object({
 export const postRoutes = new Hono<{ Variables: Variables }>()
   .use('*', authMiddleware)
 
-  // POST /api/posts — create a post
   .post('/', requireAuth, zValidator('json', createPostSchema), async (c) => {
     const user = c.get('user') as User;
     const body = c.req.valid('json');
+
+    const urgency: Urgency = body.urgency && isUrgency(body.urgency) ? body.urgency : 'today';
+    const expiresAt = resolveExpiresAtInput({
+      expiresAt: body.expiresAt ?? null,
+      urgency,
+    });
 
     const [post] = await db
       .insert(schema.posts)
@@ -70,6 +84,8 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
         lng: body.lng ?? null,
         tags: body.tags?.length ? JSON.stringify(body.tags) : null,
         status: 'open',
+        urgency,
+        expiresAt,
         responseCount: 0,
       })
       .returning();
@@ -81,24 +97,25 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
     return c.json({ ok: true, post: serializePost(post) }, 201);
   })
 
-  // GET /api/posts — feed with optional filters + pagination
   .get(
     '/',
     zValidator('query', z.object({
       category: z.string().optional(),
       type: z.enum(['local', 'remote', 'interest']).optional(),
-      urgency: z.string().optional(),
+      urgency: z.enum(['asap', 'today', 'this_week', 'flexible']).optional(),
       page: z.coerce.number().default(1),
       limit: z.coerce.number().max(50).default(20),
     })),
     async (c) => {
-      const { category, type, page, limit } = c.req.valid('query');
+      await expireStalePosts();
+
+      const { category, type, urgency, page, limit } = c.req.valid('query');
       const offset = (page - 1) * limit;
 
-      const filters = [];
+      const filters = [activeOpenPostsCondition()];
       if (category) filters.push(eq(schema.posts.category, normalizeCategory(category)));
       if (type) filters.push(eq(schema.posts.type, type));
-      filters.push(eq(schema.posts.status, 'open'));
+      if (urgency) filters.push(eq(schema.posts.urgency, urgency));
 
       const postsResult = await db
         .select({
@@ -114,7 +131,7 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
         .from(schema.posts)
         .leftJoin(schema.profiles, eq(schema.posts.userId, schema.profiles.userId))
         .where(and(...filters))
-        .orderBy(desc(schema.posts.createdAt))
+        .orderBy(urgentFirstOrder, desc(schema.posts.createdAt))
         .limit(limit)
         .offset(offset);
 
@@ -140,10 +157,9 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
       }));
 
       return c.json({ ok: true, posts, page, limit }, 200);
-    }
+    },
   )
 
-  // GET /api/posts/nearby — posts near given coords within radius
   .get(
     '/nearby',
     zValidator('query', z.object({
@@ -151,11 +167,15 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
       lng: z.coerce.number(),
       radius: z.coerce.number().max(50).default(10),
       category: z.string().optional(),
-      urgency: z.string().optional(),
+      urgency: z.enum(['asap', 'today', 'this_week', 'flexible']).optional(),
       limit: z.coerce.number().max(100).default(50),
     })),
     async (c) => {
-      const { lat, lng, radius, category, limit } = c.req.valid('query');
+      await expireStalePosts();
+
+      const { lat, lng, radius, category, urgency, limit } = c.req.valid('query');
+      const now = Date.now();
+      const legacyCutoff = now - 24 * 60 * 60 * 1000;
 
       const latDelta = radius / 111.0;
       const lngDelta = radius / (111.0 * Math.cos(lat * Math.PI / 180));
@@ -167,19 +187,26 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
 
       const normalizedCat = category && category !== 'all' ? normalizeCategory(category) : null;
       const catFilter = normalizedCat ? `AND p.category = '${normalizedCat.replace(/'/g, "''")}'` : '';
+      const urgencyFilter = urgency ? `AND p.urgency = '${urgency.replace(/'/g, "''")}'` : '';
+
       const rawSql = sql`
         SELECT p.id, p.user_id, p.title, p.body, p.category, p.type, p.is_paid, p.amount,
-               p.distance, p.status, p.response_count, p.created_at, p.lat, p.lng,
+               p.distance, p.status, p.urgency, p.expires_at, p.response_count, p.created_at, p.lat, p.lng,
                pr.user_id as profile_user_id, pr.avatar, pr.location as profile_location, pr.rating
         FROM posts p
         LEFT JOIN profiles pr ON p.user_id = pr.user_id
         WHERE p.status = 'open'
+          AND (
+            (p.expires_at IS NOT NULL AND p.expires_at > ${now})
+            OR (p.expires_at IS NULL AND p.created_at > ${legacyCutoff})
+          )
           AND p.lat IS NOT NULL
           AND p.lng IS NOT NULL
           AND p.lat BETWEEN ${latMin} AND ${latMax}
           AND p.lng BETWEEN ${lngMin} AND ${lngMax}
           ${sql.raw(catFilter)}
-        ORDER BY p.created_at DESC
+          ${sql.raw(urgencyFilter)}
+        ORDER BY CASE WHEN p.urgency = 'asap' THEN 0 ELSE 1 END, p.created_at DESC
         LIMIT ${limit}
       `;
 
@@ -190,12 +217,13 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
           category: normalizeCategory(r[4] as string),
           type: (r[5] as string) as 'local' | 'remote' | 'interest',
           isPaid: !!(r[6] as number), amount: r[7] as number | null, distance: r[8] as string | null,
-          status: r[9] as string, responseCount: r[10] as number, createdAt: r[11] as number,
-          lat: r[12] as number, lng: r[13] as number,
+          status: r[9] as string, urgency: r[10] as string, expiresAt: r[11] as number | null,
+          responseCount: r[12] as number, createdAt: r[13] as number,
+          lat: r[14] as number, lng: r[15] as number,
         },
         profile: {
-          userId: r[14] as string | null, avatar: r[15] as string | null,
-          location: r[16] as string | null, rating: (r[17] as number | null) ?? 0,
+          userId: r[16] as string | null, avatar: r[17] as string | null,
+          location: r[18] as string | null, rating: (r[19] as number | null) ?? 0,
         },
       }));
 
@@ -222,6 +250,8 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
             isPaid: r.post.isPaid,
             amount: r.post.amount,
             status: r.post.status,
+            urgency: r.post.urgency,
+            expiresAt: r.post.expiresAt,
             responseCount: r.post.responseCount,
             createdAt: r.post.createdAt,
             lat: fuzzLat,
@@ -235,7 +265,12 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
             },
           };
         })
-        .sort((a, b) => a.distanceKm - b.distanceKm);
+        .sort((a, b) => {
+          const aUrgent = a.urgency === 'asap' ? 0 : 1;
+          const bUrgent = b.urgency === 'asap' ? 0 : 1;
+          if (aUrgent !== bUrgent) return aUrgent - bUrgent;
+          return a.distanceKm - b.distanceKm;
+        });
 
       const userIds = [...new Set(nearby.map(p => p.author.userId))];
       const authUsers = userIds.length > 0
@@ -245,11 +280,30 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
       const posts = nearby.map(p => ({ ...p, author: { ...p.author, name: userMap[p.author.userId]?.name ?? 'User' } }));
 
       return c.json({ ok: true, posts, count: posts.length, center: { lat, lng }, radius }, 200);
-    }
+    },
   )
 
-  // GET /api/posts/:id — single post with author + response count
+  .patch('/:id/close', requireAuth, async (c) => {
+    const user = c.get('user') as User;
+    const { id } = c.req.param();
+
+    const [post] = await db.select().from(schema.posts).where(eq(schema.posts.id, id));
+    if (!post) return c.json({ message: 'Not found' }, 404);
+    if (post.userId !== user.id) return c.json({ message: 'Forbidden' }, 403);
+    if (post.status !== 'open') return c.json({ message: 'Post is not open' }, 400);
+
+    const [updated] = await db
+      .update(schema.posts)
+      .set({ status: 'closed', closedAt: new Date() })
+      .where(eq(schema.posts.id, id))
+      .returning();
+
+    return c.json({ ok: true, post: serializePost(updated) }, 200);
+  })
+
   .get('/:id', async (c) => {
+    await expireStalePosts();
+
     const { id } = c.req.param();
 
     const [result] = await db

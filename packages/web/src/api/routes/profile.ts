@@ -6,6 +6,7 @@ import * as schema from "../database/schema";
 import { eq, desc, and, count, sql } from "drizzle-orm";
 import { authMiddleware, requireAuth } from "../middleware/auth";
 import type { auth } from "../auth";
+import { expireStalePosts, activeOpenPostsCondition } from "../lib/post-expiry";
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
@@ -130,6 +131,8 @@ export const profileRoutes = new Hono<{ Variables: Variables }>()
 
   // GET /api/profile/my/posts — current user's posts, paginated
   .get("/my/posts", requireAuth, async (c) => {
+    await expireStalePosts();
+
     const user = c.get("user") as User;
     const page = Number(c.req.query("page") ?? 1);
     const limit = Math.min(Number(c.req.query("limit") ?? 20), 50);
@@ -152,6 +155,8 @@ export const profileRoutes = new Hono<{ Variables: Variables }>()
 
   // GET /api/profile/my/responses — posts user responded to (helped)
   .get("/my/responses", requireAuth, async (c) => {
+    await expireStalePosts();
+
     const user = c.get("user") as User;
     const page = Number(c.req.query("page") ?? 1);
     const limit = Math.min(Number(c.req.query("limit") ?? 20), 50);
@@ -183,13 +188,15 @@ export const profileRoutes = new Hono<{ Variables: Variables }>()
 
   // GET /api/profile/my/active — open posts + accepted responses (active tasks)
   .get("/my/active", requireAuth, async (c) => {
+    await expireStalePosts();
+
     const user = c.get("user") as User;
 
     // My open posts
     const myOpenPosts = await db
       .select()
       .from(schema.posts)
-      .where(and(eq(schema.posts.userId, user.id), eq(schema.posts.status, "open")))
+      .where(and(eq(schema.posts.userId, user.id), activeOpenPostsCondition()))
       .orderBy(desc(schema.posts.createdAt))
       .limit(10);
 

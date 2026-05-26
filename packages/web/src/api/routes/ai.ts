@@ -1,248 +1,187 @@
-import { Hono } from 'hono';
-
-import { zValidator } from '@hono/zod-validator';
-
-import { z } from 'zod';
-
-import { authMiddleware, requireAuth } from '../middleware/auth';
-
-import type { auth } from '../auth';
-
+import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
+import { authMiddleware, requireAuth } from "../middleware/auth";
+import type { auth } from "../auth";
 import {
-
-  ANALYZE_SYSTEM_PROMPT,
-
+  buildAnalyzeSystemPrompt,
   buildStructureSystemPrompt,
-
   sanitizeAnalyzeResult,
-
+  hasTimeSignal,
+  hasUrgentSignal,
   type AnalyzeResult,
-
-} from '../../shared/ai-prompts';
-
-
+} from "../../shared/ai-prompts";
+import { webSearch } from "../lib/web-search";
+import { isUrgency, resolveExpiresAtInput, type Urgency } from "../lib/post-expiry";
 
 type User = typeof auth.$Infer.Session.user;
-
 type Session = typeof auth.$Infer.Session.session;
-
 type Variables = { user: User | null; session: Session | null };
 
+const GROQ_API_KEY = process.env.GROQ_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
+const GROQ_BASE = "https://api.groq.com/openai/v1/chat/completions";
+const MODEL = "openai/gpt-oss-120b";
 
-
-const GROQ_API_KEY = process.env.GROQ_API_KEY ?? process.env.OPENAI_API_KEY ?? '';
-
-const GROQ_BASE = 'https://api.groq.com/openai/v1';
-
-const MODEL = 'openai/gpt-oss-120b';
-
-
-
-if (!GROQ_API_KEY && process.env.NODE_ENV !== 'production') {
-
-  console.error('[AI] GROQ_API_KEY is missing — AI routes will return errors');
-
+if (!GROQ_API_KEY && process.env.NODE_ENV !== "production") {
+  console.error("[AI] GROQ_API_KEY is missing — AI routes will return errors");
 }
-
-
 
 async function chat(
-
   messages: { role: string; content: string }[],
-
   temperature = 0.3,
-
 ): Promise<string> {
+  if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY not configured");
 
-  if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY not configured');
-
-
-
-  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-
-    method: 'POST',
-
+  const res = await fetch(GROQ_BASE, {
+    method: "POST",
     headers: {
-
-      'Content-Type': 'application/json',
-
+      "Content-Type": "application/json",
       Authorization: `Bearer ${GROQ_API_KEY}`,
-
     },
-
     body: JSON.stringify({ model: MODEL, messages, temperature }),
-
   });
 
-
-
   if (!res.ok) {
-
     const err = await res.text();
-
     throw new Error(`Groq API error ${res.status}: ${err}`);
-
   }
 
-
-
-  const data = await res.json() as { choices: { message: { content: string } }[] };
-
+  const data = (await res.json()) as { choices: { message: { content: string } }[] };
   return data.choices[0].message.content;
-
 }
-
-
 
 function parseJsonContent<T>(content: string): T {
-
-  const cleaned = content.replace(/```json\n?|\n?```/g, '').trim();
-
+  const cleaned = content.replace(/```json\n?|\n?```/g, "").trim();
   return JSON.parse(cleaned) as T;
-
 }
 
+function inferUrgencyFromAnswers(answers: string[], request: string): Urgency {
+  const combined = `${request} ${answers.join(" ")}`.toLowerCase();
+  if (hasUrgentSignal(combined) || /\basap\b/i.test(combined)) return "asap";
+  if (/\btoday\b|\btonight\b|\bthis evening\b/i.test(combined)) return "today";
+  if (/\bthis week\b|\bweekend\b|\btomorrow\b/i.test(combined)) return "this_week";
+  return "today";
+}
 
+function normalizeStructuredThread(
+  parsed: Record<string, unknown>,
+  request: string,
+  answers: string[],
+): Record<string, unknown> {
+  let urgency = isUrgency(String(parsed.urgency ?? ""))
+    ? (parsed.urgency as Urgency)
+    : inferUrgencyFromAnswers(answers, request);
+
+  if (hasUrgentSignal(request) && !hasTimeSignal(request)) {
+    urgency = "asap";
+  }
+
+  const expiresAt = resolveExpiresAtInput({
+    expiresAt: parsed.expiresAt ? String(parsed.expiresAt) : null,
+    urgency,
+  });
+
+  return {
+    ...parsed,
+    urgency,
+    expiresAt: expiresAt.toISOString(),
+    timingSummary:
+      parsed.timingSummary ??
+      (urgency === "asap" ? "Expires in 2 hours" : urgency === "today" ? "Expires in 24 hours" : undefined),
+  };
+}
 
 const aiRoutes = new Hono<{ Variables: Variables }>()
-
-  .use('*', authMiddleware)
-
-  .use('*', requireAuth)
-
-
+  .use("*", authMiddleware)
+  .use("*", requireAuth)
 
   .post(
-
-    '/analyze',
-
-    zValidator('json', z.object({ request: z.string().min(5).max(600) })),
-
+    "/analyze",
+    zValidator("json", z.object({ request: z.string().min(5).max(600) })),
     async (c) => {
-
-      const { request } = c.req.valid('json');
-
-
+      const { request } = c.req.valid("json");
+      const now = new Date();
 
       try {
+        let searchContext = "";
+        if (!hasTimeSignal(request) && !hasUrgentSignal(request)) {
+          const snippets = await webSearch(`current time ${now.toISOString()} ${request} deadline when`);
+          if (snippets) {
+            searchContext = `\n\nWeb search context (use to infer timing if helpful):\n${snippets}`;
+          }
+        }
 
         const content = await chat([
-
-          { role: 'system', content: ANALYZE_SYSTEM_PROMPT },
-
-          { role: 'user', content: request },
-
+          { role: "system", content: buildAnalyzeSystemPrompt(now) },
+          { role: "user", content: request + searchContext },
         ]);
 
-
-
         const parsed = parseJsonContent<{
-
           complete?: boolean;
-
           intent?: string;
-
           known?: Record<string, string>;
-
           questions?: { question: string; options: string[] }[];
-
         }>(content);
-
-
 
         const result: AnalyzeResult = sanitizeAnalyzeResult(request, parsed);
 
-
-
         return c.json({
-
           ok: true,
-
           complete: result.complete,
-
           intent: result.intent,
-
           known: result.known,
-
           questions: result.questions,
-
         }, 200);
-
       } catch (err) {
-
-        console.error('[AI /analyze]', err);
-
-        return c.json({ ok: false, error: 'AI unavailable' }, 500);
-
+        console.error("[AI /analyze]", err);
+        return c.json({ ok: false, error: "AI unavailable" }, 500);
       }
-
-    }
-
+    },
   )
 
-
-
   .post(
-
-    '/structure',
-
-    zValidator('json', z.object({
-
+    "/structure",
+    zValidator("json", z.object({
       request: z.string().min(5).max(600),
-
       answers: z.array(z.string()),
-
       intent: z.string().optional(),
-
       known: z.record(z.string(), z.string()).optional(),
-
     })),
-
     async (c) => {
-
-      const { request, answers, intent, known } = c.req.valid('json');
+      const { request, answers, intent, known } = c.req.valid("json");
+      const now = new Date();
 
       const answersText = answers.length > 0
+        ? answers.map((a, i) => `Answer ${i + 1}: ${a}`).join("\n")
+        : "(none — request was complete enough to skip follow-up)";
 
-        ? answers.map((a, i) => `Answer ${i + 1}: ${a}`).join('\n')
-
-        : '(none — request was complete enough to skip follow-up)';
-
-
+      let searchContext = "";
+      if (!hasTimeSignal(request) && !hasUrgentSignal(request) && answers.every((a) => !hasTimeSignal(a))) {
+        const snippets = await webSearch(`${request} when deadline time today`);
+        if (snippets) {
+          searchContext = `\n\nWeb search context:\n${snippets}`;
+        }
+      }
 
       const contextParts = [
-
         `Request: ${request}`,
-
-        intent ? `Intent: ${intent}` : '',
-
+        intent ? `Intent: ${intent}` : "",
         known && Object.keys(known).length > 0
-
           ? `Known fields: ${JSON.stringify(known)}`
-
-          : '',
-
+          : "",
         answersText,
-
-      ].filter(Boolean).join('\n\n');
-
-
+        searchContext,
+      ].filter(Boolean).join("\n\n");
 
       try {
-
         const content = await chat([
-
-          { role: 'system', content: buildStructureSystemPrompt() },
-
-          { role: 'user', content: contextParts },
-
+          { role: "system", content: buildStructureSystemPrompt(now) },
+          { role: "user", content: contextParts },
         ]);
 
-
-
         const parsed = parseJsonContent<Record<string, unknown>>(content);
-        const title = String(parsed.title ?? '').trim();
-        const body = String(parsed.body ?? '').trim();
+        const title = String(parsed.title ?? "").trim();
+        const body = String(parsed.body ?? "").trim();
         if (!title && body) {
           parsed.title = body.length > 70 ? `${body.slice(0, 67)}...` : body;
         } else if (!title) {
@@ -251,21 +190,14 @@ const aiRoutes = new Hono<{ Variables: Variables }>()
         if (!body && parsed.title) {
           parsed.body = String(parsed.title);
         }
-        return c.json({ ok: true, thread: parsed }, 200);
 
+        const thread = normalizeStructuredThread(parsed, request, answers);
+        return c.json({ ok: true, thread }, 200);
       } catch (err) {
-
-        console.error('[AI /structure]', err);
-
-        return c.json({ ok: false, error: 'AI unavailable' }, 500);
-
+        console.error("[AI /structure]", err);
+        return c.json({ ok: false, error: "AI unavailable" }, 500);
       }
-
-    }
-
+    },
   );
 
-
-
 export default aiRoutes;
-

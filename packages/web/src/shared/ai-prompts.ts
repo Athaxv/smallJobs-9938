@@ -150,7 +150,7 @@ export function sanitizeAnalyzeResult(
     } else if (needsTime) {
       questions.push({
         question: "When do you need this?",
-        options: ["Today", "This week", "Flexible"],
+        options: ["ASAP (urgent)", "Today", "This week", "Flexible"],
       });
     } else if (needsPay) {
       questions.push({
@@ -170,7 +170,23 @@ export function sanitizeAnalyzeResult(
   };
 }
 
-export const ANALYZE_SYSTEM_PROMPT = `You are an AI assistant for SmallJobs — a hyperlocal community app in India where people post small requests (errands, walks, run clubs, study help, creative gigs, hangouts, etc.).
+const URGENT_SIGNAL =
+  /\b(asap|urgent|emergency|right now|immediately|now)\b/i;
+
+export function hasUrgentSignal(request: string): boolean {
+  return URGENT_SIGNAL.test(request);
+}
+
+export function getDatetimeContext(now = new Date()): string {
+  return `Current datetime (UTC): ${now.toISOString()}
+User timezone hint: Asia/Kolkata (IST, UTC+5:30)
+Use this to resolve relative times like "today", "tonight", "7 pm", "tomorrow".`;
+}
+
+export function buildAnalyzeSystemPrompt(now = new Date()): string {
+  return `${getDatetimeContext(now)}
+
+You are an AI assistant for SmallJobs — a hyperlocal community app in India where people post small requests (errands, walks, run clubs, study help, creative gigs, hangouts, etc.).
 
 Your job: read the request, infer intent, extract what is ALREADY known, and return ONLY follow-up questions for missing essentials (0 to 3 questions).
 
@@ -183,7 +199,7 @@ Step 1 — Infer intent (one of):
 - other: does not fit above
 
 Step 2 — Extract known fields from the request text into "known" (only include if stated or clearly inferable):
-- timing (e.g. "morning", "6am", "tonight", "this weekend")
+- timing (e.g. "morning", "6am", "tonight", "7 pm today", "this weekend")
 - location (e.g. "near Koramangala", "near me", specific place)
 - compensation (e.g. "free", "will pay 500", "paid")
 
@@ -191,7 +207,7 @@ Step 3 — Questions (0–3 ONLY):
 - Ask ONLY if a field is required to create a good post AND is missing from the request
 - NEVER ask about payment for walks, runs, clubs, hangouts, or social meetups unless the user mentioned paying
 - NEVER ask "nearby vs online" for clearly physical activities (walk, run, pickup, delivery, meet in person)
-- NEVER ask timing if the user already gave a time window (morning, 6am, tonight, today, weekend, etc.)
+- NEVER ask timing if the user already gave a time window (morning, 6am, tonight, today, 7 pm, weekend, etc.)
 - Each question: 3–4 short tap options
 - Casual friendly English tone
 
@@ -200,9 +216,14 @@ If timing, location/context, and compensation stance are all inferable → set c
 Return ONLY valid JSON, no markdown fences:
 
 {"complete":false,"intent":"social_companion","known":{"timing":"6am","location":"Koramangala","compensation":"free"},"questions":[{"question":"...","options":["...","..."]}]}`;
+}
 
-export function buildStructureSystemPrompt(): string {
-  return `You are an AI assistant for SmallJobs — a hyperlocal community app in India.
+export const ANALYZE_SYSTEM_PROMPT = buildAnalyzeSystemPrompt();
+
+export function buildStructureSystemPrompt(now = new Date()): string {
+  return `${getDatetimeContext(now)}
+
+You are an AI assistant for SmallJobs — a hyperlocal community app in India.
 
 Given a user's raw request, their follow-up answers (may be empty), intent, and known fields, return a structured thread object.
 
@@ -223,14 +244,26 @@ Rules:
 - tags: 2–5 lowercase specific tags (never generic like "task", "help")
 - isPaid: true ONLY if user explicitly confirmed payment in request or answers. Default false for social/walk/run/club/hangout/interest.
 - amount: midpoint INR from chosen range only if isPaid is true; never invent
-- urgency: "asap" | "today" | "this_week" | "flexible" — infer from request/answers/known timing
+- urgency: "asap" | "today" | "this_week" | "flexible"
+  - "asap" for urgent/asap/right now/emergency (expires in 2 hours)
+  - "today" for same-day or within 24 hours
+  - "this_week" for this week / weekend
+  - "flexible" when no rush
+- expiresAt: ISO 8601 datetime when the post should stop accepting responses
+  - Explicit time ("7 pm today", "walk at 7 pm") → set expiresAt to that exact datetime
+  - urgency "asap" → expiresAt = current time + 2 hours
+  - urgency "today" with no explicit time → current time + 24 hours
+  - urgency "this_week" → current time + 7 days
+  - urgency "flexible" → current time + 3 days
+  - No timing at all → urgency "today", expiresAt = current time + 24 hours
+- timingSummary: short human-readable deadline (e.g. "Today at 7 PM", "Expires in 2 hours")
 - visibility: one natural sentence about who can see/respond
 
 Use intent and known fields even when answers array is empty.
 
 Return ONLY valid JSON, no markdown:
 
-{"title":"...","body":"...","type":"local","category":"walking","tags":["..."],"isPaid":false,"urgency":"flexible","visibility":"..."}`;
+{"title":"...","body":"...","type":"local","category":"walking","tags":["..."],"isPaid":false,"urgency":"flexible","expiresAt":"2026-05-22T19:00:00+05:30","timingSummary":"Today at 7 PM","visibility":"..."}`;
 }
 
 /** Client-side fallback when AI is unavailable — mirrors server sanitizer rules. */
