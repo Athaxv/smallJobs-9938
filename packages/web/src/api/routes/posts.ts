@@ -16,6 +16,7 @@ import {
   urgentFirstOrder,
   type Urgency,
 } from '../lib/post-expiry';
+import { getPostViewerState } from '../lib/post-viewer';
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
@@ -328,6 +329,11 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
       .from(schema.user)
       .where(eq(schema.user.id, result.post.userId));
 
+    const user = c.get('user') as User | null;
+    const viewer = user && user.id !== result.post.userId
+      ? await getPostViewerState(id, user.id)
+      : undefined;
+
     return c.json({
       ok: true,
       post: {
@@ -341,5 +347,6 @@ export const postRoutes = new Hono<{ Variables: Variables }>()
           ratingCount: result.profile?.ratingCount ?? 0,
         },
       },
+      ...(viewer ? { viewer } : {}),
     }, 200);
   });

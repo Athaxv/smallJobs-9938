@@ -7,6 +7,8 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { authMiddleware, requireAuth } from '../middleware/auth';
 import type { auth } from '../auth';
 import { isPostActive } from '../lib/post-expiry';
+import { getConversationForHelper } from '../lib/post-viewer';
+import { getActiveLocalHelp, isNavigablePost } from '../lib/active-help';
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
@@ -48,7 +50,36 @@ export const responseRoutes = new Hono<{ Variables: Variables }>()
         .select()
         .from(schema.responses)
         .where(and(eq(schema.responses.postId, postId), eq(schema.responses.userId, user.id)));
-      if (existing) return c.json({ message: 'Already responded' }, 409);
+      if (existing) {
+        const conversationId = await getConversationForHelper(postId, user.id);
+        return c.json(
+          { ok: false, message: 'Already responded', conversationId },
+          409,
+        );
+      }
+
+      if (isNavigablePost(post)) {
+        const activeHelp = await getActiveLocalHelp(user.id);
+        if (activeHelp && activeHelp.post.id !== postId) {
+          return c.json(
+            {
+              ok: false,
+              message: 'Already helping on another task',
+              activeHelp: {
+                postId: activeHelp.post.id,
+                postTitle: activeHelp.post.title,
+                conversationId: activeHelp.conversationId,
+                responseId: activeHelp.responseId,
+                lat: activeHelp.post.lat,
+                lng: activeHelp.post.lng,
+                category: activeHelp.post.category,
+                type: activeHelp.post.type,
+              },
+            },
+            409,
+          );
+        }
+      }
 
       const [response] = await db
         .insert(schema.responses)
@@ -197,4 +228,41 @@ export const responseRoutes = new Hono<{ Variables: Variables }>()
       .returning();
 
     return c.json({ ok: true, conversationId: conv.id }, 201);
+  })
+
+  // PATCH /api/responses/:id/arrive — helper marks arrival at destination
+  .patch('/:id/arrive', requireAuth, async (c) => {
+    const user = c.get('user') as User;
+    const { id } = c.req.param();
+
+    const [response] = await db
+      .select()
+      .from(schema.responses)
+      .where(eq(schema.responses.id, id));
+    if (!response) return c.json({ message: 'Not found' }, 404);
+    if (response.userId !== user.id) return c.json({ message: 'Forbidden' }, 403);
+
+    const [post] = await db
+      .select()
+      .from(schema.posts)
+      .where(eq(schema.posts.id, response.postId));
+    if (!post) return c.json({ message: 'Post not found' }, 404);
+    if (!isNavigablePost(post)) {
+      return c.json({ message: 'This task has no map destination' }, 400);
+    }
+
+    if (response.arrivedAt) {
+      return c.json({
+        ok: true,
+        arrivedAt: response.arrivedAt.toISOString(),
+      }, 200);
+    }
+
+    const now = new Date();
+    await db
+      .update(schema.responses)
+      .set({ arrivedAt: now })
+      .where(eq(schema.responses.id, id));
+
+    return c.json({ ok: true, arrivedAt: now.toISOString() }, 200);
   });

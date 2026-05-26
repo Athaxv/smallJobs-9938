@@ -70,6 +70,7 @@ export const responses = sqliteTable("responses", {
   userId: text("user_id").notNull(),
   message: text("message").notNull(),
   status: text("status", { enum: ["pending", "accepted", "rejected"] }).notNull().default("pending"),
+  arrivedAt: integer("arrived_at", { mode: "timestamp_ms" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .notNull(),
