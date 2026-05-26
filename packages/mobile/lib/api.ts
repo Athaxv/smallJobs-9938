@@ -47,9 +47,37 @@ export interface Post {
   isPaid: boolean;
   amount: number | null;
   status: "open" | "closed" | "expired";
+  urgency?: "asap" | "today" | "this_week" | "flexible";
+  expiresAt?: number | string | null;
+  closedAt?: number | string | null;
+  lat?: number | null;
+  lng?: number | null;
   responseCount: number;
   tags?: string[] | null;
   createdAt: number | string;
+}
+
+export interface PostViewer {
+  hasResponded: boolean;
+  conversationId?: string;
+  responseId?: string;
+  arrivedAt?: string | null;
+  blockedByActiveHelp?: {
+    postId: string;
+    postTitle: string;
+    conversationId?: string;
+    responseId: string;
+    lat?: number | null;
+    lng?: number | null;
+    category?: string;
+    type?: string;
+  };
+}
+
+export interface ActiveHelpSummary {
+  responseId: string;
+  conversationId?: string;
+  post: Post;
 }
 
 export interface ResponseItem {
@@ -62,7 +90,7 @@ export interface ResponseItem {
 
 export interface ActiveSummary {
   myOpenPosts: Post[];
-  helping: { responseId: string; post: Post }[];
+  helping: { responseId: string; conversationId?: string; post: Post }[];
 }
 
 export interface MyProfileResponse {
@@ -124,6 +152,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify(opts.json),
       }),
+    $close: async (postId: string) =>
+      apiFetch<{ ok: boolean; post: Post }>(`/posts/${postId}/close`, {
+        method: "PATCH",
+      }),
   },
 };
 
@@ -168,6 +200,17 @@ export const profileApi = {
   getMyActive: () =>
     profileFetch<{ ok: boolean } & ActiveSummary>("/profile/my/active"),
 
+  getActiveHelp: () =>
+    profileFetch<{ ok: boolean; activeHelp: ActiveHelpSummary | null }>(
+      "/profile/my/active-help",
+    ),
+
+  markArrived: (responseId: string) =>
+    profileFetch<{ ok: boolean; arrivedAt: string }>(
+      `/responses/${responseId}/arrive`,
+      { method: "PATCH" },
+    ),
+
   getPublic: (userId: string) =>
     profileFetch<{
       ok: boolean;
@@ -201,6 +244,8 @@ export interface StructuredThread {
   isPaid: boolean;
   amount?: number;
   urgency: "asap" | "today" | "this_week" | "flexible";
+  expiresAt?: string;
+  timingSummary?: string;
   visibility: string;
 }
 

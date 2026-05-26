@@ -7,6 +7,8 @@ import { eq, desc, and, count, sql } from "drizzle-orm";
 import { authMiddleware, requireAuth } from "../middleware/auth";
 import type { auth } from "../auth";
 import { expireStalePosts, activeOpenPostsCondition } from "../lib/post-expiry";
+import { getConversationForHelper } from "../lib/post-viewer";
+import { getActiveLocalHelp, isActiveLocalHelp } from "../lib/active-help";
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
@@ -209,12 +211,40 @@ export const profileRoutes = new Hono<{ Variables: Variables }>()
       .orderBy(desc(schema.responses.createdAt))
       .limit(10);
 
-    const helping = helpingRows.map(r => ({
-      responseId: r.response.id,
-      post: r.post,
-    }));
+    const helping = (
+      await Promise.all(
+        helpingRows
+          .filter((r) => isActiveLocalHelp(r.response, r.post))
+          .map(async (r) => ({
+            responseId: r.response.id,
+            conversationId: await getConversationForHelper(r.post.id, user.id),
+            post: r.post,
+          })),
+      )
+    ).slice(0, 10);
 
     return c.json({ ok: true, myOpenPosts, helping }, 200);
+  })
+
+  // GET /api/profile/my/active-help — single active local help (en route)
+  .get("/my/active-help", requireAuth, async (c) => {
+    await expireStalePosts();
+
+    const user = c.get("user") as User;
+    const activeHelp = await getActiveLocalHelp(user.id);
+
+    if (!activeHelp) {
+      return c.json({ ok: true, activeHelp: null }, 200);
+    }
+
+    return c.json({
+      ok: true,
+      activeHelp: {
+        responseId: activeHelp.responseId,
+        conversationId: activeHelp.conversationId,
+        post: activeHelp.post,
+      },
+    }, 200);
   })
 
   // GET /api/profile/:userId — public profile view
