@@ -9,6 +9,8 @@ import {
   sanitizeAnalyzeResult,
   hasTimeSignal,
   hasUrgentSignal,
+  inferUrgencyFromRequestAndAnswers,
+  isInferredUrgency,
   type AnalyzeResult,
 } from "../../shared/ai-prompts";
 import { webSearch } from "../lib/web-search";
@@ -55,26 +57,41 @@ function parseJsonContent<T>(content: string): T {
   return JSON.parse(cleaned) as T;
 }
 
-function inferUrgencyFromAnswers(answers: string[], request: string): Urgency {
-  const combined = `${request} ${answers.join(" ")}`.toLowerCase();
-  if (hasUrgentSignal(combined) || /\basap\b/i.test(combined)) return "asap";
-  if (/\btoday\b|\btonight\b|\bthis evening\b/i.test(combined)) return "today";
-  if (/\bthis week\b|\bweekend\b|\btomorrow\b/i.test(combined)) return "this_week";
+function resolveThreadUrgency(
+  parsed: Record<string, unknown>,
+  request: string,
+  answers: string[],
+  known?: Record<string, string>,
+): Urgency {
+  if (known?.urgency && isInferredUrgency(known.urgency)) {
+    return known.urgency;
+  }
+
+  const fromText = inferUrgencyFromRequestAndAnswers(request, answers);
+  if (fromText) return fromText;
+
+  if (isUrgency(String(parsed.urgency ?? ""))) {
+    return parsed.urgency as Urgency;
+  }
+
   return "today";
+}
+
+function defaultTimingSummary(urgency: Urgency): string | undefined {
+  if (urgency === "asap") return "Expires in 2 hours";
+  if (urgency === "today") return "Expires in 24 hours";
+  if (urgency === "this_week") return "Expires in 7 days";
+  if (urgency === "flexible") return "Expires in 3 days";
+  return undefined;
 }
 
 function normalizeStructuredThread(
   parsed: Record<string, unknown>,
   request: string,
   answers: string[],
+  known?: Record<string, string>,
 ): Record<string, unknown> {
-  let urgency = isUrgency(String(parsed.urgency ?? ""))
-    ? (parsed.urgency as Urgency)
-    : inferUrgencyFromAnswers(answers, request);
-
-  if (hasUrgentSignal(request) && !hasTimeSignal(request)) {
-    urgency = "asap";
-  }
+  const urgency = resolveThreadUrgency(parsed, request, answers, known);
 
   const expiresAt = resolveExpiresAtInput({
     expiresAt: parsed.expiresAt ? String(parsed.expiresAt) : null,
@@ -85,9 +102,7 @@ function normalizeStructuredThread(
     ...parsed,
     urgency,
     expiresAt: expiresAt.toISOString(),
-    timingSummary:
-      parsed.timingSummary ??
-      (urgency === "asap" ? "Expires in 2 hours" : urgency === "today" ? "Expires in 24 hours" : undefined),
+    timingSummary: parsed.timingSummary ?? defaultTimingSummary(urgency),
   };
 }
 
@@ -191,7 +206,7 @@ const aiRoutes = new Hono<{ Variables: Variables }>()
           parsed.body = String(parsed.title);
         }
 
-        const thread = normalizeStructuredThread(parsed, request, answers);
+        const thread = normalizeStructuredThread(parsed, request, answers, known);
         return c.json({ ok: true, thread }, 200);
       } catch (err) {
         console.error("[AI /structure]", err);

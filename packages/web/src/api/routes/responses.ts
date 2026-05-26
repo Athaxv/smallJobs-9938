@@ -6,6 +6,7 @@ import * as schema from '../database/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { authMiddleware, requireAuth } from '../middleware/auth';
 import type { auth } from '../auth';
+import { isPostActive } from '../lib/post-expiry';
 
 type User = typeof auth.$Infer.Session.user;
 type Session = typeof auth.$Infer.Session.session;
@@ -32,6 +33,10 @@ export const responseRoutes = new Hono<{ Variables: Variables }>()
         .from(schema.posts)
         .where(eq(schema.posts.id, postId));
       if (!post) return c.json({ message: 'Post not found' }, 404);
+
+      if (!isPostActive(post)) {
+        return c.json({ message: 'This post is no longer accepting responses' }, 400);
+      }
 
       // Prevent author from responding to own post
       if (post.userId === user.id) {

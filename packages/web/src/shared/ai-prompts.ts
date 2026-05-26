@@ -1,5 +1,45 @@
 import { CATEGORY_IDS } from "./categories";
 
+export type InferredUrgency = "asap" | "today" | "this_week" | "flexible";
+
+const URGENCY_LEVELS: readonly InferredUrgency[] = ["asap", "today", "this_week", "flexible"];
+
+export function isInferredUrgency(value: string | undefined | null): value is InferredUrgency {
+  return URGENCY_LEVELS.includes(value as InferredUrgency);
+}
+
+const URGENCY_ASAP =
+  /\b(asap|urgent(?:ly)?|emergency|right now|immediately|jaldi|quickly|need now|within an hour|can't wait|cannot wait|hurry|as soon as possible)\b/i;
+
+const URGENCY_TODAY =
+  /\b(today|tonight|this evening|by tonight|same day|before midnight)\b/i;
+
+const URGENCY_THIS_WEEK =
+  /\b(tomorrow|this week|weekend|next few days|by friday)\b/i;
+
+const URGENCY_FLEXIBLE =
+  /\b(flexible|no rush|whenever|anytime|any time|no hurry)\b/i;
+
+/** Infer urgency level from free text (request, answers, or combined). First match wins. */
+export function inferUrgencyFromText(text: string): InferredUrgency | null {
+  if (URGENCY_ASAP.test(text)) return "asap";
+  if (URGENCY_TODAY.test(text)) return "today";
+  if (URGENCY_THIS_WEEK.test(text)) return "this_week";
+  if (URGENCY_FLEXIBLE.test(text)) return "flexible";
+  return null;
+}
+
+export function inferUrgencyFromRequestAndAnswers(
+  request: string,
+  answers: string[] = [],
+): InferredUrgency | null {
+  return inferUrgencyFromText(`${request} ${answers.join(" ")}`.trim());
+}
+
+export function hasUrgentSignal(request: string): boolean {
+  return inferUrgencyFromText(request) === "asap";
+}
+
 export const INTENT_TYPES = [
   "social_companion",
   "paid_task",
@@ -103,8 +143,15 @@ export function sanitizeAnalyzeResult(
     ? (parsed.intent as IntentType)
     : inferIntentFromRequest(request);
 
-  const known = parsed.known ?? {};
+  const known = { ...(parsed.known ?? {}) };
   let questions = (parsed.questions ?? []).slice(0, 3);
+
+  if (!known.urgency || !isInferredUrgency(known.urgency)) {
+    const inferred = inferUrgencyFromText(request);
+    if (inferred) known.urgency = inferred;
+  }
+
+  const inferredUrgency = isInferredUrgency(known.urgency) ? known.urgency : inferUrgencyFromText(request);
 
   const socialOrInterest =
     intent === "social_companion" ||
@@ -119,7 +166,7 @@ export function sanitizeAnalyzeResult(
       if (mentionsPay(request) || mentionsFree(request)) return false;
     }
 
-    if (isTimingQuestion(text) && hasTimeSignal(request)) return false;
+    if (isTimingQuestion(text) && (hasTimeSignal(request) || inferredUrgency)) return false;
 
     if (isVisibilityQuestion(text)) {
       if (isPhysicalMeetup(request)) return false;
@@ -136,7 +183,7 @@ export function sanitizeAnalyzeResult(
     !mentionsFree(request) &&
     (intent === "paid_task" || intent === "errand_local" || PHYSICAL_SIGNAL.test(request));
 
-  const needsTime = !hasTimeSignal(request);
+  const needsTime = !hasTimeSignal(request) && !inferredUrgency;
   const needsLocation =
     (intent === "social_companion" || intent === "errand_local") &&
     !hasLocationSignal(request);
@@ -170,13 +217,6 @@ export function sanitizeAnalyzeResult(
   };
 }
 
-const URGENT_SIGNAL =
-  /\b(asap|urgent|emergency|right now|immediately|now)\b/i;
-
-export function hasUrgentSignal(request: string): boolean {
-  return URGENT_SIGNAL.test(request);
-}
-
 export function getDatetimeContext(now = new Date()): string {
   return `Current datetime (UTC): ${now.toISOString()}
 User timezone hint: Asia/Kolkata (IST, UTC+5:30)
@@ -200,6 +240,11 @@ Step 1 — Infer intent (one of):
 
 Step 2 — Extract known fields from the request text into "known" (only include if stated or clearly inferable):
 - timing (e.g. "morning", "6am", "tonight", "7 pm today", "this weekend")
+- urgency: one of "asap", "today", "this_week", "flexible" when clearly stated or inferable
+  - "urgent", "ASAP", "right now", "jaldi", "emergency" → "asap"
+  - "today", "tonight", "this evening" → "today"
+  - "tomorrow", "this week", "weekend" → "this_week"
+  - "flexible", "no rush", "whenever" → "flexible"
 - location (e.g. "near Koramangala", "near me", specific place)
 - compensation (e.g. "free", "will pay 500", "paid")
 
@@ -207,15 +252,15 @@ Step 3 — Questions (0–3 ONLY):
 - Ask ONLY if a field is required to create a good post AND is missing from the request
 - NEVER ask about payment for walks, runs, clubs, hangouts, or social meetups unless the user mentioned paying
 - NEVER ask "nearby vs online" for clearly physical activities (walk, run, pickup, delivery, meet in person)
-- NEVER ask timing if the user already gave a time window (morning, 6am, tonight, today, 7 pm, weekend, etc.)
+- NEVER ask timing if the user already gave a time window OR urgency is already known in "known"
 - Each question: 3–4 short tap options
 - Casual friendly English tone
 
-If timing, location/context, and compensation stance are all inferable → set complete: true and questions: []
+If timing or urgency, location/context, and compensation stance are all inferable → set complete: true and questions: []
 
 Return ONLY valid JSON, no markdown fences:
 
-{"complete":false,"intent":"social_companion","known":{"timing":"6am","location":"Koramangala","compensation":"free"},"questions":[{"question":"...","options":["...","..."]}]}`;
+{"complete":false,"intent":"social_companion","known":{"timing":"6am","urgency":"today","location":"Koramangala","compensation":"free"},"questions":[{"question":"...","options":["...","..."]}]}`;
 }
 
 export const ANALYZE_SYSTEM_PROMPT = buildAnalyzeSystemPrompt();
@@ -244,11 +289,13 @@ Rules:
 - tags: 2–5 lowercase specific tags (never generic like "task", "help")
 - isPaid: true ONLY if user explicitly confirmed payment in request or answers. Default false for social/walk/run/club/hangout/interest.
 - amount: midpoint INR from chosen range only if isPaid is true; never invent
-- urgency: "asap" | "today" | "this_week" | "flexible"
-  - "asap" for urgent/asap/right now/emergency (expires in 2 hours)
-  - "today" for same-day or within 24 hours
-  - "this_week" for this week / weekend
-  - "flexible" when no rush
+- urgency: "asap" | "today" | "this_week" | "flexible" — ALWAYS derive from user wording first
+  - If Known fields includes "urgency", use that value
+  - "asap" for urgent/asap/right now/emergency/jaldi/hurry (expires in 2 hours)
+  - "today" for same-day, tonight, this evening (within 24 hours)
+  - "this_week" for tomorrow, this week, weekend
+  - "flexible" for no rush, whenever, flexible timing
+  - Follow-up answer "ASAP (urgent)" → "asap"; "Today" → "today"; "This week" → "this_week"; "Flexible" → "flexible"
 - expiresAt: ISO 8601 datetime when the post should stop accepting responses
   - Explicit time ("7 pm today", "walk at 7 pm") → set expiresAt to that exact datetime
   - urgency "asap" → expiresAt = current time + 2 hours
@@ -259,7 +306,7 @@ Rules:
 - timingSummary: short human-readable deadline (e.g. "Today at 7 PM", "Expires in 2 hours")
 - visibility: one natural sentence about who can see/respond
 
-Use intent and known fields even when answers array is empty.
+Use intent and known fields (especially known.urgency) even when answers array is empty.
 
 Return ONLY valid JSON, no markdown:
 
@@ -271,6 +318,8 @@ export function getFallbackAnalyze(request: string): AnalyzeResult {
   const intent = inferIntentFromRequest(request);
   const known: Record<string, string> = {};
   if (hasTimeSignal(request)) known.timing = "stated in request";
+  const inferredUrgency = inferUrgencyFromText(request);
+  if (inferredUrgency) known.urgency = inferredUrgency;
   if (hasLocationSignal(request)) known.location = "stated in request";
   if (mentionsFree(request)) known.compensation = "free";
   if (mentionsPay(request)) known.compensation = "paid";

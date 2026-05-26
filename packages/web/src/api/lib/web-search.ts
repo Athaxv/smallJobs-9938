@@ -1,17 +1,22 @@
-const SERPER_URL = "https://google.serper.dev/search";
+const TAVILY_URL = "https://api.tavily.com/search";
 
 export async function webSearch(query: string, maxResults = 3): Promise<string> {
-  const apiKey = process.env.SERPER_API_KEY?.trim();
+  const apiKey = process.env.TAVILY_API_KEY?.trim();
   if (!apiKey) return "";
 
   try {
-    const res = await fetch(SERPER_URL, {
+    const res = await fetch(TAVILY_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-API-KEY": apiKey,
+        Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ q: query, num: maxResults }),
+      body: JSON.stringify({
+        query,
+        max_results: maxResults,
+        search_depth: "basic",
+        include_answer: "basic",
+      }),
     });
 
     if (!res.ok) {
@@ -20,17 +25,16 @@ export async function webSearch(query: string, maxResults = 3): Promise<string> 
     }
 
     const data = (await res.json()) as {
-      organic?: { title?: string; snippet?: string }[];
-      answerBox?: { answer?: string; snippet?: string };
+      answer?: string;
+      results?: { title?: string; content?: string }[];
     };
 
     const parts: string[] = [];
-    if (data.answerBox?.answer) parts.push(data.answerBox.answer);
-    else if (data.answerBox?.snippet) parts.push(data.answerBox.snippet);
+    if (data.answer?.trim()) parts.push(data.answer.trim());
 
-    for (const item of data.organic ?? []) {
-      if (item.title && item.snippet) {
-        parts.push(`${item.title}: ${item.snippet}`);
+    for (const item of data.results ?? []) {
+      if (item.title && item.content) {
+        parts.push(`${item.title}: ${item.content}`);
       }
     }
 
