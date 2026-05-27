@@ -146,6 +146,16 @@
       transparent 1px
     );
     background-size: 18px 18px;
+    -webkit-mask-image: radial-gradient(
+      ellipse 85% 75% at 50% 40%,
+      black 20%,
+      transparent 72%
+    );
+    mask-image: radial-gradient(
+      ellipse 85% 75% at 50% 40%,
+      black 20%,
+      transparent 72%
+    );
   }
 
   .footer-dot-grid-fine {
@@ -155,6 +165,60 @@
       transparent 0.75px
     );
     background-size: 10px 10px;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      black 35%,
+      black 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      black 35%,
+      black 100%
+    );
+  }
+
+  .footer-surface {
+    background: linear-gradient(
+      to bottom,
+      #ffffff 0%,
+      #fafafa 45%,
+      var(--color-sj-surface) 100%
+    );
+  }
+
+  .footer-top-fade {
+    background: linear-gradient(to bottom, #ffffff, transparent);
+  }
+
+  .footer-watermark {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    margin: 0;
+    font-family: var(--font-serif);
+    font-size: clamp(5rem, 22vw, 12rem);
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    text-align: center;
+    user-select: none;
+    pointer-events: none;
+    color: rgba(17, 17, 17, 0.03);
+    -webkit-text-stroke: 1px rgba(17, 17, 17, 0.12);
+    paint-order: stroke fill;
+  }
+
+  .footer-divider-dotted {
+    height: 1px;
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(17, 17, 17, 0.14) 0,
+      rgba(17, 17, 17, 0.14) 4px,
+      transparent 4px,
+      transparent 10px
+    );
   }
 }
 
@@ -191,6 +255,17 @@
   }
 }
 
+@keyframes footer-watermark-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;
@@ -218,11 +293,16 @@
   animation: fade-up 0.5s ease both;
 }
 
+.animate-footer-watermark {
+  animation: footer-watermark-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-hero-logo,
   .animate-hero-card,
   .animate-hero-btn,
-  .animate-fade-up {
+  .animate-fade-up,
+  .animate-footer-watermark {
     animation: none;
     opacity: 1;
     transform: none;

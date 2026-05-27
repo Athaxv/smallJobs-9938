@@ -1,21 +1,28 @@
+import { DownloadButton } from "./download-button";
+
 export function Footer() {
   return (
-    <footer className="relative overflow-hidden border-t border-black/5 bg-white">
-      {/* Dotted background layers */}
+    <footer className="relative overflow-hidden border-t border-black/5">
+      {/* Background layers */}
       <div
-        className="footer-dot-grid pointer-events-none absolute inset-0 opacity-[0.35]"
+        className="footer-surface pointer-events-none absolute inset-0"
         aria-hidden="true"
       />
       <div
-        className="footer-dot-grid-fine pointer-events-none absolute inset-x-0 bottom-0 h-[55%] opacity-50"
+        className="footer-top-fade pointer-events-none absolute inset-x-0 top-0 h-12"
         aria-hidden="true"
       />
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[repeating-linear-gradient(90deg,rgba(17,17,17,0.12)_0,rgba(17,17,17,0.12)_4px,transparent_4px,transparent_10px)]"
+        className="footer-dot-grid pointer-events-none absolute inset-0 opacity-40"
+        aria-hidden="true"
+      />
+      <div
+        className="footer-dot-grid-fine pointer-events-none absolute inset-x-0 bottom-0 h-[60%] opacity-55"
         aria-hidden="true"
       />
 
-      <div className="landing-container relative z-10 flex flex-col gap-8 py-12 sm:flex-row sm:items-end sm:justify-between lg:py-14">
+      {/* Band A — Content */}
+      <div className="landing-container relative z-10 flex min-h-[180px] flex-col gap-8 py-12 sm:flex-row sm:items-end sm:justify-between lg:min-h-[200px] lg:py-14">
         <div>
           <a
             href="#top"
@@ -28,30 +35,27 @@ export function Footer() {
           </p>
         </div>
 
-        <div className="flex flex-col items-start gap-3 sm:items-end">
-          <a
-            href="/smalljobs.apk"
-            className="text-sm font-medium text-sj-primary underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-70"
-          >
-            Download APK
-          </a>
+        <div className="flex flex-col items-start gap-4 sm:items-end">
+          <DownloadButton compact label="Download APK" loadingLabel="Starting…" />
           <p className="text-sm text-sj-placeholder">© 2026 SmallJobs</p>
         </div>
       </div>
 
-      <div className="relative z-10 border-t border-dotted border-black/10">
-        <div className="overflow-hidden pb-0 pt-4">
-          <p
-            className="pointer-events-none translate-y-[18%] select-none text-center font-serif text-[clamp(4.5rem,20vw,11rem)] leading-none tracking-tight text-transparent"
-            style={{
-              WebkitTextStroke: "1px rgba(17,17,17,0.1)",
-              paintOrder: "stroke fill",
-            }}
-            aria-hidden="true"
-          >
-            SmallJobs
-          </p>
+      {/* Band B — Dotted divider */}
+      <div className="relative z-10 px-6 lg:px-8">
+        <div className="landing-container">
+          <div className="footer-divider-dotted w-full" aria-hidden="true" />
         </div>
+      </div>
+
+      {/* Band C — Watermark */}
+      <div className="relative z-10 h-[clamp(7rem,20vw,12rem)] overflow-hidden">
+        <p
+          className="footer-watermark animate-footer-watermark"
+          aria-hidden="true"
+        >
+          SmallJobs
+        </p>
       </div>
     </footer>
   );
